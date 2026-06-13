@@ -45,7 +45,7 @@ export function ConnectWalletButton() {
       onClick={() => void connect().catch(() => {})}
       className="rounded-full bg-accent px-5 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
     >
-      {connecting ? "Connecting…" : "Connect Wallet"}
+      {connecting ? "Loading.." : "Connect Wallet"}
     </button>
   );
 }

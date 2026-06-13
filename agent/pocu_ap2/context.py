@@ -51,6 +51,43 @@ def insert_receipt(row: dict[str, Any]) -> None:
     sb.table("ap2_payment_receipts").insert(row).execute()
 
 
+def get_payment_receipts_for_thread(thread_id: str, user_account_id: str) -> list[dict[str, Any]]:
+    sb = get_supabase()
+    sessions_result = (
+        sb.table("ap2_sessions")
+        .select("id")
+        .eq("thread_id", thread_id)
+        .eq("user_account_id", user_account_id)
+        .execute()
+    )
+    session_ids = [row["id"] for row in (sessions_result.data or [])]
+    if not session_ids:
+        return []
+
+    receipts_result = (
+        sb.table("ap2_payment_receipts")
+        .select("id, session_id, reason, amount_tinybars, hedera_tx_id, created_at")
+        .in_("session_id", session_ids)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    receipts: list[dict[str, Any]] = []
+    for row in receipts_result.data or []:
+        amount_tinybars = int(row.get("amount_tinybars") or 0)
+        receipts.append(
+            {
+                "id": row.get("id"),
+                "session_id": row.get("session_id"),
+                "reason": row.get("reason") or "",
+                "amount_hbar": amount_tinybars / 100_000_000,
+                "amount_tinybars": amount_tinybars,
+                "hedera_tx_id": row.get("hedera_tx_id") or "",
+                "created_at": row.get("created_at"),
+            }
+        )
+    return receipts
+
+
 def apply_settlement_to_session(session_id: str, settlement: dict[str, Any]) -> None:
     update_session(
         session_id,

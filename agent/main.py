@@ -234,6 +234,16 @@ async def activate_ap2_session(session_id: str, req: ActivateAp2SessionRequest) 
         raise HTTPException(500, str(e)) from e
 
 
+@app.get("/ap2/sessions/by-thread/{thread_id}/payments")
+def get_ap2_payments_for_thread(thread_id: str, user_account_id: str = "") -> list[dict[str, Any]]:
+    from pocu_ap2.context import get_payment_receipts_for_thread
+
+    uid = user_account_id.strip()
+    if not uid:
+        raise HTTPException(400, "user_account_id is required")
+    return get_payment_receipts_for_thread(thread_id.strip(), uid)
+
+
 @app.get("/ap2/sessions/by-thread/{thread_id}")
 def get_ap2_session_for_thread(thread_id: str, user_account_id: str = "") -> dict[str, Any]:
     from pocu_ap2.session import get_session, get_thread_session

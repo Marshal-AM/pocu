@@ -45,26 +45,26 @@ describe("authorizeSessionAllowance", () => {
     vi.clearAllTimers();
   });
 
-  it("always calls wallet when mirror already shows sufficient allowance", async () => {
+  it("skips wallet when mirror already shows sufficient allowance", async () => {
     fetchHbarAllowance.mockResolvedValue(200);
-    walletSignAndExecute.mockResolvedValue("0.0.9211283@1.2");
-
-    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
-    const result = await authorizeSessionAllowance("0.0.9211283");
-    expect(result).toBe("0.0.9211283@1.2");
-    expect(walletSignAndExecute).toHaveBeenCalledOnce();
-    expect(waitForHbarAllowance).not.toHaveBeenCalled();
-  });
-
-  it("falls back to existing_allowance when wallet fails but on-chain allowance remains", async () => {
-    fetchHbarAllowance.mockResolvedValue(200);
-    walletSignAndExecute.mockRejectedValue(new Error("wallet timeout"));
 
     const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
     const result = await authorizeSessionAllowance("0.0.9211283");
     expect(result).toBe("existing_allowance");
-    expect(walletSignAndExecute).toHaveBeenCalledOnce();
+    expect(walletSignAndExecute).not.toHaveBeenCalled();
     expect(waitForHbarAllowance).not.toHaveBeenCalled();
+  });
+
+  it("falls back to mirror_confirmed when wallet fails but on-chain allowance appears", async () => {
+    fetchHbarAllowance.mockResolvedValueOnce(0).mockResolvedValueOnce(200);
+    walletSignAndExecute.mockRejectedValue(new Error("wallet timeout"));
+    waitForHbarAllowance.mockResolvedValue(200);
+
+    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
+    const result = await authorizeSessionAllowance("0.0.9211283");
+    expect(result).toBe("mirror_confirmed");
+    expect(walletSignAndExecute).toHaveBeenCalledOnce();
+    expect(waitForHbarAllowance).toHaveBeenCalledOnce();
   });
 
   it("returns mirror_confirmed when mirror poll wins while wallet hangs", async () => {

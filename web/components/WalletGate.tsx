@@ -19,7 +19,7 @@ export function WalletGate({ children }: { children: ReactNode }) {
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        Initializing wallet…
+        Loading..
       </div>
     );
   }
@@ -51,7 +51,7 @@ export function WalletGate({ children }: { children: ReactNode }) {
                 );
               }}
             >
-              {connecting ? "Connecting…" : "Connect Wallet"}
+              {connecting ? "Loading.." : "Connect Wallet"}
             </Button>
           </CardContent>
         </Card>

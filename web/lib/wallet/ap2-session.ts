@@ -88,13 +88,18 @@ function buildAllowanceTransaction(userAccountId: string, agentAccountId: string
     .setTransactionMemo(`POCU AP2 session allowance ${ALLOWANCE_HBAR} HBAR`);
 }
 
-/** Always opens HashPack for session authorize; mirror poll only when allowance not yet on-chain. */
+/** Opens HashPack when allowance is missing; mirror poll recovers if WalletConnect hangs after approve. */
 export async function authorizeSessionAllowance(
   userAccountId: string,
   onStep?: (step: Ap2SetupStep, message: string) => void
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
   const baseline = await fetchHbarAllowance(userAccountId, agentAccountId);
+
+  if (baseline >= ALLOWANCE_HBAR) {
+    onStep?.("allowance", "HBAR allowance already on-chain. Continuing…");
+    return "existing_allowance";
+  }
 
   onStep?.("allowance", STEP_MESSAGES.allowance);
 
@@ -104,16 +109,6 @@ export async function authorizeSessionAllowance(
       buildAllowanceTransaction(userAccountId, agentAccountId),
       "AP2 session allowance"
     );
-
-  if (baseline >= ALLOWANCE_HBAR) {
-    try {
-      return await walletTx();
-    } catch (e) {
-      const final = await fetchHbarAllowance(userAccountId, agentAccountId);
-      if (final >= ALLOWANCE_HBAR) return "existing_allowance";
-      throw e;
-    }
-  }
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
@@ -292,6 +287,19 @@ export async function fetchAp2Session(
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+}
+
+import type { Ap2Payment } from "@/components/agent/types";
+
+export async function fetchAp2PaymentsForThread(
+  threadId: string,
+  userAccountId: string
+): Promise<Ap2Payment[]> {
+  const res = await fetch(
+    `/api/ap2/sessions/by-thread/${threadId}/payments?user_account_id=${encodeURIComponent(userAccountId)}`
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as Ap2Payment[];
 }
 
 export async function fetchAp2SessionForThread(

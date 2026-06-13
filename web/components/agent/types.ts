@@ -41,6 +41,16 @@ export interface ChatThread {
   created_at: string;
 }
 
+export interface Ap2Payment {
+  id?: string;
+  session_id?: string;
+  reason: string;
+  amount_hbar: number;
+  amount_tinybars?: number;
+  hedera_tx_id: string;
+  created_at?: string;
+}
+
 export const USE_CASE_CHIPS = [
   "Fraud detection",
   "Heart disease screening",

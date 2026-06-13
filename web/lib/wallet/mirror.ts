@@ -7,20 +7,24 @@ export async function fetchHbarAllowance(
   ownerAccountId: string,
   spenderAccountId: string
 ): Promise<number> {
-  const res = await fetch(
-    `${MIRROR_URL}/api/v1/accounts/${ownerAccountId}/allowances/crypto`
-  );
-  if (res.status === 404) return 0;
-  if (!res.ok) return 0;
-  const data = (await res.json()) as {
-    allowances?: { spender?: string; amount?: number; amount_granted?: number }[];
-  };
-  for (const row of data.allowances ?? []) {
-    if ((row.spender ?? "").trim() === spenderAccountId) {
-      return Number(row.amount ?? row.amount_granted ?? 0) / 1e8;
+  try {
+    const res = await fetch(
+      `${MIRROR_URL}/api/v1/accounts/${ownerAccountId}/allowances/crypto`
+    );
+    if (res.status === 404) return 0;
+    if (!res.ok) return 0;
+    const data = (await res.json()) as {
+      allowances?: { spender?: string; amount?: number; amount_granted?: number }[];
+    };
+    for (const row of data.allowances ?? []) {
+      if ((row.spender ?? "").trim() === spenderAccountId) {
+        return Number(row.amount ?? row.amount_granted ?? 0) / 1e8;
+      }
     }
+    return 0;
+  } catch {
+    return 0;
   }
-  return 0;
 }
 
 /** Poll mirror until allowance >= minHbar or timeout. */

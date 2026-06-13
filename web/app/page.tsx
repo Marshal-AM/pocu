@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/components/agent/ChatPanel";
 import type {
+  Ap2Payment,
   Architecture,
   ChatBlock,
   ChatThread,
@@ -12,6 +13,7 @@ import {
   authorizeSessionAllowance,
   completeAp2SessionAfterAllowance,
   ensureAp2ReadyForTraining,
+  fetchAp2PaymentsForThread,
   fetchAp2SessionForThread,
   validateWalletConfigAgainstAgent,
   type Ap2SessionState,
@@ -43,7 +45,9 @@ export default function HomePage() {
   const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
   const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
   const [ap2SetupError, setAp2SetupError] = useState<string | null>(null);
-  const [ap2SettlementNote, setAp2SettlementNote] = useState<string | null>(null);
+  const [ap2PaymentsByThread, setAp2PaymentsByThread] = useState<
+    Record<string, Ap2Payment[]>
+  >({});
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
   const loadedAccountRef = useRef<string | null>(null);
   const chatRequestId = useRef(0);
@@ -71,6 +75,19 @@ export default function HomePage() {
     }
   }, [accountId]);
 
+  const loadAp2PaymentsForThread = useCallback(
+    async (id: string) => {
+      if (!accountId) return;
+      try {
+        const payments = await fetchAp2PaymentsForThread(id, accountId);
+        setAp2PaymentsByThread((prev) => ({ ...prev, [id]: payments }));
+      } catch {
+        /* ignore — payments are optional */
+      }
+    },
+    [accountId]
+  );
+
   const loadAp2SessionForThread = useCallback(
     async (id: string) => {
       if (!accountId) {
@@ -92,6 +109,7 @@ export default function HomePage() {
       if (!accountId) return;
       chatRequestId.current += 1;
       ap2SetupRequestId.current += 1;
+      setAp2SetupLoading(false);
       setLoading(false);
       setPipelineStatus(null);
       setJobProgress(null);
@@ -113,11 +131,12 @@ export default function HomePage() {
         setChat(data.messages ?? []);
         if (data.title) setUseCase(data.title);
         await loadAp2SessionForThread(data.id);
+        void loadAp2PaymentsForThread(data.id);
       } catch {
         /* ignore */
       }
     },
-    [accountId, threadStorageKey, loadAp2SessionForThread]
+    [accountId, threadStorageKey, loadAp2SessionForThread, loadAp2PaymentsForThread]
   );
 
   const createChat = useCallback(async () => {
@@ -389,7 +408,6 @@ export default function HomePage() {
     });
     setLoading(true);
     setAgentError(null);
-    setAp2SettlementNote(null);
     setPipelineStatus(null);
     setJobProgress(null);
 
@@ -448,11 +466,23 @@ export default function HomePage() {
 
             if (event.type === "status" && event.message) {
               setPipelineStatus(event.message);
-            } else if (event.type === "ap2_settlement") {
-              const amt =
-                event.amount_hbar != null ? `${event.amount_hbar} HBAR` : "HBAR";
-              const tx = event.hedera_tx_id ? ` (tx ${event.hedera_tx_id})` : "";
-              setAp2SettlementNote(`AP2 payment: ${amt} debited from allowance${tx}`);
+            } else if (event.type === "ap2_settlement" && threadId) {
+              const payment: Ap2Payment = {
+                amount_hbar: event.amount_hbar ?? 0.1,
+                hedera_tx_id: event.hedera_tx_id ?? "",
+                reason: "chat_turn",
+                created_at: new Date().toISOString(),
+              };
+              setAp2PaymentsByThread((prev) => {
+                const current = prev[threadId] ?? [];
+                if (
+                  payment.hedera_tx_id &&
+                  current.some((p) => p.hedera_tx_id === payment.hedera_tx_id)
+                ) {
+                  return prev;
+                }
+                return { ...prev, [threadId]: [payment, ...current] };
+              });
             } else if (event.type === "job_progress") {
               setJobProgress({
                 status: event.status,
@@ -578,7 +608,10 @@ export default function HomePage() {
     <div className="flex h-full min-h-0 w-full flex-1">
       <ChatPanel
         agentError={agentError}
-        ap2SettlementNote={ap2SettlementNote}
+        ap2Payments={threadId ? ap2PaymentsByThread[threadId] ?? [] : []}
+        onLoadAp2Payments={
+          threadId ? () => loadAp2PaymentsForThread(threadId) : undefined
+        }
         ap2SessionActive={ap2SessionActive}
         ap2SetupLoading={ap2SetupLoading}
         ap2SetupStatus={ap2SetupStatus}

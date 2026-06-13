@@ -38,8 +38,10 @@ export function Ap2AuthorizeOverlay({
           train. Each reply costs {CHAT_TURN_HBAR} HBAR.
         </p>
 
-        {statusMessage && (
-          <p className="mt-3 text-sm text-muted-foreground">{statusMessage}</p>
+        {(loading || statusMessage) && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {loading ? "Loading.." : statusMessage}
+          </p>
         )}
         {errorMessage && (
           <p className="mt-3 text-sm text-destructive">{errorMessage}</p>
@@ -60,7 +62,7 @@ export function Ap2AuthorizeOverlay({
             disabled={loading}
             className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
-            {loading ? "Authorizing…" : "Authorize"}
+            {loading ? "Loading.." : "Authorize"}
           </button>
         </div>
       </div>

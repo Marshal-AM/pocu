@@ -137,7 +137,7 @@ export function ThreadList({
                 disabled={renameSaving || !renameValue.trim()}
                 className="flex-1 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
               >
-                {renameSaving ? "Saving…" : "Save"}
+                {renameSaving ? "Loading.." : "Save"}
               </button>
             </div>
           </div>
