@@ -30,7 +30,7 @@ export function Ap2SetupGate({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Ap2SetupModal
-        open={showSetup && !sessionActive}
+        open={showSetup}
         loading={setupLoading}
         statusMessage={setupStatus}
         onAuthorize={onAuthorize}

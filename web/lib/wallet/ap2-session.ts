@@ -22,28 +22,6 @@ export interface Ap2SessionState {
   summary?: string;
 }
 
-/** Agent may return `session_id` (create/activate) or `id` (GET row). */
-export function normalizeAp2Session(raw: Record<string, unknown>): Ap2SessionState {
-  const session_id = String(raw.session_id ?? raw.id ?? "").trim();
-  return {
-    session_id,
-    status: String(raw.status ?? "").trim().toLowerCase(),
-    budget_hbar:
-      typeof raw.budget_hbar === "number" ? raw.budget_hbar : undefined,
-    chat_turn_hbar:
-      typeof raw.chat_turn_hbar === "number" ? raw.chat_turn_hbar : undefined,
-    remaining_hbar:
-      typeof raw.remaining_hbar === "number" ? raw.remaining_hbar : undefined,
-    summary: typeof raw.summary === "string" ? raw.summary : undefined,
-  };
-}
-
-export function isAp2SessionActive(
-  session: Ap2SessionState | null | undefined
-): boolean {
-  return session?.status === "active" && Boolean(session.session_id);
-}
-
 export type Ap2SetupStep = "allowance" | "associate" | "activate";
 
 const STEP_MESSAGES: Record<Ap2SetupStep, string> = {
@@ -122,7 +100,7 @@ export async function createAp2Session(params: {
     }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+  return (await res.json()) as Ap2SessionState;
 }
 
 export async function activateAp2Session(params: {
@@ -141,7 +119,7 @@ export async function activateAp2Session(params: {
     }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+  return (await res.json()) as Ap2SessionState;
 }
 
 export async function setupAp2Session(params: {
@@ -162,32 +140,12 @@ export async function setupAp2Session(params: {
     await associateModelNftIfNeeded(params.userAccountId, params.onStep);
     await pauseBetweenWalletSteps();
   }
-  const activated = await activateAp2Session({
+  return activateAp2Session({
     sessionId: pending.session_id,
     userAccountId: params.userAccountId,
     allowanceTxId,
     onStep: params.onStep,
   });
-  return confirmAp2SessionActive(activated.session_id, params.userAccountId);
-}
-
-/** Re-fetch session from agent so UI always matches server after wallet steps. */
-export async function confirmAp2SessionActive(
-  sessionId: string,
-  userAccountId: string,
-  attempts = 4,
-  delayMs = 750
-): Promise<Ap2SessionState> {
-  let last: Ap2SessionState | null = null;
-  for (let i = 0; i < attempts; i++) {
-    last = await fetchAp2Session(sessionId, userAccountId);
-    if (last && isAp2SessionActive(last)) return last;
-    if (i < attempts - 1) {
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
-  if (last) return last;
-  throw new Error("AP2 session could not be confirmed as active");
 }
 
 export async function fetchAp2Session(
@@ -199,5 +157,5 @@ export async function fetchAp2Session(
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
-  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+  return (await res.json()) as Ap2SessionState;
 }
