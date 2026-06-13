@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare, Sparkles } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import type { Architecture, ChatBlock, ChatThread } from "@/components/agent/types";
 import { ChatMessage } from "@/components/agent/ChatMessage";
 import { ConfigSummary } from "@/components/agent/ConfigSummary";
@@ -144,14 +144,13 @@ export function ChatPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="mt-5 gap-2 border-accent/30 text-accent hover:bg-accent/10"
+                  className="mt-5 border-accent/30 text-accent hover:bg-accent/10 hover:text-accent"
                   onClick={() =>
                     onMessageChange(
                       "Build a fraud detection model on credit card data"
                     )
                   }
                 >
-                  <Sparkles className="h-3.5 w-3.5" />
                   Try an example
                 </Button>
               </div>
