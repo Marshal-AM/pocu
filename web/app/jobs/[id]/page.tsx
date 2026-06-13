@@ -173,6 +173,12 @@ export default function JobDetailPage() {
               label="Target column"
               value={String(job.target_column ?? "—")}
             />
+            {job.error_message ? (
+              <OnChainField
+                label="Error"
+                value={<span className="text-destructive">{String(job.error_message)}</span>}
+              />
+            ) : null}
           </CardContent>
         </Card>
 
@@ -244,56 +250,23 @@ export default function JobDetailPage() {
                 )
               }
             />
-          </CardContent>
-        </Card>
-
-        <Card className="border-border py-5 lg:col-span-2">
-          <CardHeader className="px-5 pb-4">
-            <CardTitle className="text-base">ACP & payment</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 px-5">
             <OnChainField
-              label="ACP order"
-              value={
-                <>
-                  {String(job.acp_order_id ?? "—")}
-                  {job.status ? ` · ${String(job.status)}` : ""}
-                  {job.acp_progress_pct != null
-                    ? ` (${String(job.acp_progress_pct)}%)`
-                    : ""}
-                </>
-              }
-            />
-            <OnChainField
-              label="Total spent (MPP)"
-              value={
-                job.total_spent_hbar != null
-                  ? `${String(job.total_spent_hbar)} HBAR`
-                  : "—"
-              }
-            />
-            <OnChainField
-              label="Model file"
+              label="Model manifest"
               value={
                 hasManifest ? (
                   <a
                     href={`/api/jobs/${id}/manifest?account_id=${encodeURIComponent(accountId ?? "")}`}
                     download="cpu_model_manifest.json"
-                    className="text-accent hover:underline"
+                    className="inline-flex items-center gap-1 text-accent hover:underline"
                   >
-                    Download manifest
+                    <Download className="h-3.5 w-3.5" />
+                    cpu_model_manifest.json
                   </a>
                 ) : (
                   "Pending…"
                 )
               }
             />
-            {job.error_message ? (
-              <OnChainField
-                label="Error"
-                value={String(job.error_message)}
-              />
-            ) : null}
           </CardContent>
         </Card>
       </div>
