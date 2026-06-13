@@ -54,10 +54,12 @@ export default function JobDetailPage() {
 
   useEffect(() => {
     if (!accountId) return;
+    const walletAccountId = accountId;
+
     async function load() {
       try {
         const res = await fetch(
-          `/api/jobs/${id}?account_id=${encodeURIComponent(accountId)}`
+          `/api/jobs/${id}?account_id=${encodeURIComponent(walletAccountId)}`
         );
         if (!res.ok) throw new Error(await res.text());
         setJob(await res.json());

@@ -1,0 +1,45 @@
+# Frontend (deploy separately on Vercel)
+web/
+
+# Dependencies & build artifacts
+node_modules/
+web/node_modules/
+web/.next/
+agent/__pycache__/
+agent/venv/
+**/__pycache__/
+cache/
+artifacts/
+typechain-types/
+dist/
+coverage/
+
+# Secrets & local env
+.env
+.env.*
+web/.env.local
+!.env.example
+!web/.env.example
+
+# Runtime data
+output/
+data/kaggle/
+*.log
+
+# Git & IDE
+.git/
+.gitignore
+.cursor/
+.vscode/
+
+# Docs & reference
+docs/
+reference/
+
+# Tests
+test/
+
+# Large / optional local files
+deployments/testnet.json
+deployments/hts.json
+deployments/hcs.json
