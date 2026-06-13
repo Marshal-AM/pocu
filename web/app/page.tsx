@@ -10,17 +10,20 @@ import type {
 } from "@/components/agent/types";
 import { useWallet } from "../components/WalletProvider";
 import {
-  authorizeSessionAllowance,
+  associateModelNftIfNeeded,
   completeAp2SessionAfterAllowance,
+  ensureAllowanceTxId,
   ensureAp2ReadyForTraining,
+  fetchAp2AllowanceHbar,
   fetchAp2PaymentsForThread,
   fetchAp2SessionForThread,
+  hasUsableAp2Allowance,
+  provisionAp2SessionForThread,
   requiresAp2Reauthorization,
   validateWalletConfigAgainstAgent,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
-import { ALLOWANCE_HBAR } from "@/lib/wallet/config";
 import { ensureWalletReadyForSigning } from "@/lib/wallet/hashpack-connect";
 
 export default function HomePage() {
@@ -49,23 +52,40 @@ export default function HomePage() {
   const [ap2PaymentsByThread, setAp2PaymentsByThread] = useState<
     Record<string, Ap2Payment[]>
   >({});
+  const [ap2AllowanceHbar, setAp2AllowanceHbar] = useState<number | null>(null);
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
   const loadedAccountRef = useRef<string | null>(null);
   const chatRequestId = useRef(0);
   const ap2SetupRequestId = useRef(0);
+  const autoSetupThreadRef = useRef<string | null>(null);
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
   const ap2SessionActive = ap2Session?.status === "active";
+  const showAp2Overlay =
+    ap2AllowanceHbar !== null && !hasUsableAp2Allowance(ap2AllowanceHbar);
+
+  const refreshAp2Allowance = useCallback(async () => {
+    if (!accountId) {
+      setAp2AllowanceHbar(null);
+      return;
+    }
+    try {
+      setAp2AllowanceHbar(await fetchAp2AllowanceHbar(accountId));
+    } catch {
+      setAp2AllowanceHbar(0);
+    }
+  }, [accountId]);
 
   const invalidateAp2Session = useCallback(() => {
     setAp2Session(null);
     setAp2SetupError(null);
     setAp2SetupStatus(null);
-  }, [setAp2Session]);
+    void refreshAp2Allowance();
+  }, [setAp2Session, refreshAp2Allowance]);
 
   const handleAp2SessionFailure = useCallback(
-    (message: string): boolean => {
+    async (message: string): Promise<boolean> => {
       if (!requiresAp2Reauthorization(message)) return false;
       invalidateAp2Session();
       setAgentError(null);
@@ -120,7 +140,7 @@ export default function HomePage() {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (!handleAp2SessionFailure(msg)) {
+        if (!(await handleAp2SessionFailure(msg))) {
           setAp2Session(null);
         }
       }
@@ -234,6 +254,7 @@ export default function HomePage() {
         setThreadId(null);
         setChat([]);
         setAp2Session(null);
+        setAp2AllowanceHbar(null);
       }
       return;
     }
@@ -272,6 +293,11 @@ export default function HomePage() {
     setAp2Session,
   ]);
 
+  useEffect(() => {
+    if (!accountId || !walletReady) return;
+    void refreshAp2Allowance();
+  }, [accountId, walletReady, refreshAp2Allowance]);
+
   function upsertAssistantBlock(
     updater: (block: ChatBlock) => ChatBlock,
     requestId: number
@@ -289,80 +315,138 @@ export default function HomePage() {
     });
   }
 
-  async function runAp2Setup(): Promise<Ap2SessionState | null> {
-    if (!accountId) {
-      setAp2SetupError("Connect HashPack before authorizing.");
-      return null;
-    }
-    if (!threadId) {
-      setAp2SetupError("Create a chat before authorizing.");
-      return null;
-    }
-    const requestId = ++ap2SetupRequestId.current;
-    const isStale = () => requestId !== ap2SetupRequestId.current;
-    const setStatus = (msg: string) => {
-      if (!isStale()) setAp2SetupStatus(msg);
-    };
+  useEffect(() => {
+    autoSetupThreadRef.current = null;
+  }, [threadId]);
 
-    setAp2SetupLoading(true);
-    setAp2SetupStatus("Checking wallet configuration…");
-    setAp2SetupError(null);
-    setAgentError(null);
-    try {
-      const { getConnectedAccountId, getDAppConnector } = await import(
-        "@/lib/wallet/hedera-wallet"
-      );
-      const dApp = await getDAppConnector();
-      await ensureWalletReadyForSigning(dApp);
-      if (!getConnectedAccountId()) {
-        throw new Error("Connect HashPack first, then authorize the AP2 session.");
+  const runAp2Setup = useCallback(
+    async (options?: { silent?: boolean }): Promise<Ap2SessionState | null> => {
+      const silent = options?.silent ?? false;
+      if (!accountId) {
+        if (!silent) setAp2SetupError("Connect HashPack before authorizing.");
+        return null;
       }
-
-      await validateWalletConfigAgainstAgent();
-      if (isStale()) return null;
-
-      const onStep = (_step: Ap2SetupStep, msg: string) => setStatus(msg);
-      setStatus(`Open HashPack to approve ${ALLOWANCE_HBAR} HBAR allowance…`);
-      const allowanceTxId = await authorizeSessionAllowance(accountId, onStep);
-      if (isStale()) return null;
-
-      setStatus("Allowance confirmed. Activating AP2 session…");
-      const session = await completeAp2SessionAfterAllowance({
-        threadId,
-        userAccountId: accountId,
-        intent: useCase || "POCU chat and on-chain ML training",
-        allowanceTxId,
-        onStep,
-      });
-      if (isStale()) return null;
-      if (session.status !== "active") {
-        throw new Error(`AP2 session not active (status=${session.status})`);
+      if (!threadId) {
+        if (!silent) setAp2SetupError("Create a chat before authorizing.");
+        return null;
       }
+      const requestId = ++ap2SetupRequestId.current;
+      const isStale = () => requestId !== ap2SetupRequestId.current;
+      const setStatus = (msg: string) => {
+        if (!silent && !isStale()) setAp2SetupStatus(msg);
+      };
 
-      setStatus("Associating model NFT token (required for training)…");
-      const ready = await ensureAp2ReadyForTraining({
-        userAccountId: accountId,
-        session,
-        onStep,
-      });
-      if (isStale()) return null;
-
-      setAp2Session(ready);
-      setAp2SetupStatus(null);
-      setAp2SetupError(null);
-      return session;
-    } catch (e) {
-      if (isStale()) return null;
-      const msg = e instanceof Error ? e.message : String(e);
-      setAp2SetupError(msg);
-      setAgentError(msg);
-      return null;
-    } finally {
-      if (requestId === ap2SetupRequestId.current) {
-        setAp2SetupLoading(false);
+      setAp2SetupLoading(true);
+      if (!silent) {
+        setAp2SetupStatus("Checking wallet configuration…");
+        setAp2SetupError(null);
+        setAgentError(null);
       }
-    }
-  }
+      try {
+        await validateWalletConfigAgainstAgent();
+        if (isStale()) return null;
+
+        if (silent) {
+          if (ap2AllowanceHbar === null || !hasUsableAp2Allowance(ap2AllowanceHbar)) {
+            return null;
+          }
+          const session = await provisionAp2SessionForThread({
+            threadId,
+            userAccountId: accountId,
+            intent: useCase || "POCU chat and on-chain ML training",
+          });
+          if (isStale()) return null;
+          if (session.status !== "active") {
+            throw new Error(`AP2 session not active (status=${session.status})`);
+          }
+          setAp2Session(session);
+          return session;
+        }
+
+        const { getConnectedAccountId, getDAppConnector } = await import(
+          "@/lib/wallet/hedera-wallet"
+        );
+        const dApp = await getDAppConnector();
+        await ensureWalletReadyForSigning(dApp);
+        if (!getConnectedAccountId()) {
+          throw new Error("Connect HashPack first, then authorize the AP2 session.");
+        }
+
+        const onStep = (_step: Ap2SetupStep, msg: string) => setStatus(msg);
+        const allowanceTxId = await ensureAllowanceTxId(accountId, {
+          openWallet: true,
+          onStep,
+        });
+        if (isStale()) return null;
+
+        setStatus("Activating AP2 session…");
+        const session = await completeAp2SessionAfterAllowance({
+          threadId,
+          userAccountId: accountId,
+          intent: useCase || "POCU chat and on-chain ML training",
+          allowanceTxId,
+          onStep,
+        });
+        if (isStale()) return null;
+        if (session.status !== "active") {
+          throw new Error(`AP2 session not active (status=${session.status})`);
+        }
+
+        await associateModelNftIfNeeded(accountId, onStep);
+        if (isStale()) return null;
+
+        setAp2Session(session);
+        await refreshAp2Allowance();
+        setAp2SetupStatus(null);
+        setAp2SetupError(null);
+        return session;
+      } catch (e) {
+        if (isStale()) return null;
+        const msg = e instanceof Error ? e.message : String(e);
+        await refreshAp2Allowance();
+        if (await handleAp2SessionFailure(msg)) return null;
+        if (!silent) {
+          setAp2SetupError(msg);
+          setAgentError(msg);
+        }
+        return null;
+      } finally {
+        if (requestId === ap2SetupRequestId.current) {
+          setAp2SetupLoading(false);
+        }
+      }
+    },
+    [
+      accountId,
+      threadId,
+      useCase,
+      ap2AllowanceHbar,
+      setAp2Session,
+      refreshAp2Allowance,
+      handleAp2SessionFailure,
+    ]
+  );
+
+  useEffect(() => {
+    if (!accountId || !threadId || !walletReady) return;
+    if (ap2AllowanceHbar === null || !hasUsableAp2Allowance(ap2AllowanceHbar)) return;
+    if (ap2Session?.status === "active") return;
+    if (ap2SetupLoading) return;
+    if (autoSetupThreadRef.current === threadId) return;
+
+    autoSetupThreadRef.current = threadId;
+    void runAp2Setup({ silent: true }).then((session) => {
+      if (!session) autoSetupThreadRef.current = null;
+    });
+  }, [
+    accountId,
+    threadId,
+    walletReady,
+    ap2AllowanceHbar,
+    ap2Session?.status,
+    ap2SetupLoading,
+    runAp2Setup,
+  ]);
 
   async function handleDatasetSelect(ref: string, title: string) {
     if (!ap2SessionActive) return;
@@ -420,7 +504,7 @@ export default function HomePage() {
       setAp2Session(activeSession);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (handleAp2SessionFailure(msg)) return;
+      if (await handleAp2SessionFailure(msg)) return;
       setAgentError(msg);
       return;
     }
@@ -452,7 +536,7 @@ export default function HomePage() {
 
       if (!res.ok) {
         const err = await res.text();
-        if (handleAp2SessionFailure(err)) return;
+        if (await handleAp2SessionFailure(err)) return;
         throw new Error(err || `Chat failed (${res.status})`);
       }
       if (!res.body) throw new Error("No response body from agent");
@@ -549,7 +633,7 @@ export default function HomePage() {
                 setAgentPickedArch(Boolean(event.auto));
               }
             } else if (event.type === "text" && event.content) {
-              if (handleAp2SessionFailure(event.content)) {
+              if (await handleAp2SessionFailure(event.content)) {
                 ap2Invalidated = true;
                 break;
               }
@@ -590,7 +674,7 @@ export default function HomePage() {
                 requestId
               );
             } else if (event.content) {
-              if (handleAp2SessionFailure(event.content)) {
+              if (await handleAp2SessionFailure(event.content)) {
                 ap2Invalidated = true;
                 break;
               }
@@ -620,7 +704,7 @@ export default function HomePage() {
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (handleAp2SessionFailure(msg)) return;
+      if (await handleAp2SessionFailure(msg)) return;
       setChat((c) => {
         if (requestId !== chatRequestId.current) return c;
         return [
@@ -653,6 +737,7 @@ export default function HomePage() {
           threadId ? () => loadAp2PaymentsForThread(threadId) : undefined
         }
         ap2SessionActive={ap2SessionActive}
+        showAp2Overlay={showAp2Overlay}
         ap2SetupLoading={ap2SetupLoading}
         ap2SetupStatus={ap2SetupStatus}
         ap2SetupError={ap2SetupError}

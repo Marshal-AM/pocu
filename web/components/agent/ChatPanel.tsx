@@ -24,6 +24,7 @@ interface ChatPanelProps {
   ap2Payments: Ap2Payment[];
   onLoadAp2Payments?: () => Promise<void>;
   ap2SessionActive: boolean;
+  showAp2Overlay: boolean;
   ap2SetupLoading: boolean;
   ap2SetupStatus: string | null;
   ap2SetupError?: string | null;
@@ -65,6 +66,7 @@ export function ChatPanel({
   ap2Payments,
   onLoadAp2Payments,
   ap2SessionActive,
+  showAp2Overlay,
   ap2SetupLoading,
   ap2SetupStatus,
   ap2SetupError,
@@ -178,7 +180,7 @@ export function ChatPanel({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ChatWindowChrome
           overlay={
-            chatLocked ? (
+            showAp2Overlay ? (
               <Ap2AuthorizeOverlay
                 loading={ap2SetupLoading}
                 statusMessage={ap2SetupStatus}

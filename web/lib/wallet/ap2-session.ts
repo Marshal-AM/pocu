@@ -18,6 +18,7 @@ import {
 } from "./config";
 import { fetchHbarAllowance, isTokenAssociated, waitForHbarAllowance } from "./mirror";
 import { pauseBetweenWalletSteps, walletSignAndExecute } from "./wallet-tx";
+import type { Ap2Payment } from "@/components/agent/types";
 
 export interface Ap2SessionState {
   session_id: string;
@@ -41,6 +42,16 @@ export function normalizeAp2Session(raw: Record<string, unknown>): Ap2SessionSta
       raw.remaining_hbar != null ? Number(raw.remaining_hbar) : undefined,
     summary: raw.summary != null ? String(raw.summary) : undefined,
   };
+}
+
+/** Remaining on-chain HBAR allowance granted to the agent account. */
+export async function fetchAp2AllowanceHbar(userAccountId: string): Promise<number> {
+  const { agentAccountId } = requireWalletConfig();
+  return fetchHbarAllowance(userAccountId, agentAccountId);
+}
+
+export function hasUsableAp2Allowance(amountHbar: number): boolean {
+  return amountHbar >= CHAT_TURN_HBAR;
 }
 
 /** True when the user must authorize a new AP2 session (expired, inactive, exhausted, etc.). */
@@ -103,20 +114,30 @@ function buildAllowanceTransaction(userAccountId: string, agentAccountId: string
     .setTransactionMemo(`POCU AP2 session allowance ${ALLOWANCE_HBAR} HBAR`);
 }
 
-/** Opens HashPack when allowance is missing; mirror poll recovers if WalletConnect hangs after approve. */
-export async function authorizeSessionAllowance(
+/** Opens HashPack only when allowance is below CHAT_TURN_HBAR and openWallet is true. */
+export async function ensureAllowanceTxId(
   userAccountId: string,
-  onStep?: (step: Ap2SetupStep, message: string) => void
+  options?: {
+    openWallet?: boolean;
+    onStep?: (step: Ap2SetupStep, message: string) => void;
+  }
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
   const baseline = await fetchHbarAllowance(userAccountId, agentAccountId);
 
-  if (baseline >= ALLOWANCE_HBAR) {
-    onStep?.("allowance", "HBAR allowance already on-chain. Continuing…");
+  if (hasUsableAp2Allowance(baseline)) {
+    options?.onStep?.("allowance", "Using existing on-chain allowance.");
     return "existing_allowance";
   }
 
-  onStep?.("allowance", STEP_MESSAGES.allowance);
+  if (!options?.openWallet) {
+    throw new Error(
+      `Insufficient HBAR allowance (${baseline.toFixed(2)} HBAR on-chain). ` +
+        "Re-authorize the AP2 session in HashPack."
+    );
+  }
+
+  options?.onStep?.("allowance", STEP_MESSAGES.allowance);
 
   const walletTx = () =>
     walletSignAndExecute(
@@ -146,13 +167,13 @@ export async function authorizeSessionAllowance(
       MIRROR_ALLOWANCE_TIMEOUT_MS,
       MIRROR_ALLOWANCE_INTERVAL_MS,
       () =>
-        onStep?.("allowance", "Waiting for allowance confirmation on-chain…")
+        options?.onStep?.("allowance", "Waiting for allowance confirmation on-chain…")
     )
       .then(() => finish("mirror_confirmed"))
       .catch(async (err) => {
         if (settled) return;
         const final = await fetchHbarAllowance(userAccountId, agentAccountId);
-        if (final >= ALLOWANCE_HBAR) {
+        if (hasUsableAp2Allowance(final)) {
           finish("mirror_confirmed");
           return;
         }
@@ -160,6 +181,14 @@ export async function authorizeSessionAllowance(
         reject(err instanceof Error ? err : new Error(String(err)));
       });
   });
+}
+
+/** @deprecated use ensureAllowanceTxId */
+export async function authorizeSessionAllowance(
+  userAccountId: string,
+  onStep?: (step: Ap2SetupStep, message: string) => void
+): Promise<string> {
+  return ensureAllowanceTxId(userAccountId, { openWallet: true, onStep });
 }
 
 /** @deprecated use authorizeSessionAllowance for session authorize */
@@ -265,6 +294,29 @@ export async function completeAp2SessionAfterAllowance(params: {
   });
 }
 
+/**
+ * Create and activate a per-thread AP2 session using existing on-chain allowance.
+ * Never opens HashPack — use only when hasUsableAp2Allowance is already true.
+ */
+export async function provisionAp2SessionForThread(params: {
+  threadId: string;
+  userAccountId: string;
+  intent?: string;
+  onStep?: (step: Ap2SetupStep, message: string) => void;
+}): Promise<Ap2SessionState> {
+  const allowanceTxId = await ensureAllowanceTxId(params.userAccountId, {
+    openWallet: false,
+    onStep: params.onStep,
+  });
+  return completeAp2SessionAfterAllowance({
+    threadId: params.threadId,
+    userAccountId: params.userAccountId,
+    allowanceTxId,
+    intent: params.intent,
+    onStep: params.onStep,
+  });
+}
+
 export async function setupAp2Session(params: {
   threadId: string;
   userAccountId: string;
@@ -275,7 +327,10 @@ export async function setupAp2Session(params: {
 }): Promise<Ap2SessionState> {
   const allowanceTxId =
     params.allowanceTxId ??
-    (await authorizeSessionAllowance(params.userAccountId, params.onStep));
+    (await ensureAllowanceTxId(params.userAccountId, {
+      openWallet: true,
+      onStep: params.onStep,
+    }));
   await pauseBetweenWalletSteps();
 
   if (params.includeNftAssociate) {
@@ -303,8 +358,6 @@ export async function fetchAp2Session(
   if (!res.ok) throw new Error(await res.text());
   return normalizeAp2Session((await res.json()) as Record<string, unknown>);
 }
-
-import type { Ap2Payment } from "@/components/agent/types";
 
 export async function fetchAp2PaymentsForThread(
   threadId: string,
@@ -371,7 +424,7 @@ export async function ensureAp2ReadyForTraining(params: {
   }
 
   const allowance = await fetchHbarAllowance(params.userAccountId, agentAccountId);
-  if (allowance < CHAT_TURN_HBAR) {
+  if (!hasUsableAp2Allowance(allowance)) {
     throw new Error(
       `Insufficient HBAR allowance (${allowance.toFixed(2)} HBAR on-chain). ` +
         "Re-authorize the AP2 session in HashPack."

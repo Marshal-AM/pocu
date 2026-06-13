@@ -94,7 +94,7 @@ def activate_session(
         update_session(session_id, {"status": "expired"})
         raise ValueError("AP2 mandate expired")
 
-    verify_allowance(user_account_id)
+    verify_allowance(user_account_id, min_hbar=CHAT_TURN_HBAR)
     update_session(
         session_id,
         {
