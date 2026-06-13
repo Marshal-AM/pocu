@@ -23,6 +23,28 @@ export async function fetchHbarAllowance(
   return 0;
 }
 
+/** Poll mirror until allowance >= minHbar or timeout. */
+export async function waitForHbarAllowance(
+  ownerAccountId: string,
+  spenderAccountId: string,
+  minHbar: number,
+  timeoutMs = 90_000,
+  intervalMs = 2_000,
+  onPoll?: () => void
+): Promise<number> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    onPoll?.();
+    const amount = await fetchHbarAllowance(ownerAccountId, spenderAccountId);
+    if (amount >= minHbar) return amount;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(
+    `Timed out waiting for ${minHbar} HBAR allowance on-chain (${timeoutMs / 1000}s). ` +
+      "If you approved in HashPack, wait a moment and retry."
+  );
+}
+
 export async function isTokenAssociated(
   ownerAccountId: string,
   tokenId: string

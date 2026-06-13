@@ -30,9 +30,9 @@ export function Ap2SetupModal({
       <div className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg">
         <h2 className="text-lg font-semibold">Authorize AP2 session</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          HashPack will open so you can approve the {SESSION_BUDGET_HBAR} HBAR allowance
-          for this session. Training later only asks for wallet steps if still required
-          (e.g. NFT associate), not this allowance again.
+          If your wallet does not already have a {SESSION_BUDGET_HBAR} HBAR allowance for
+          this app, HashPack will open once to approve it. If allowance is already
+          on-chain, the session activates without another wallet prompt.
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           <li>Session budget: up to {SESSION_BUDGET_HBAR} HBAR</li>

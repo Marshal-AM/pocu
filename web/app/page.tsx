@@ -16,8 +16,8 @@ import {
 import {
   approveAp2Allowance,
   associateModelNftIfNeeded,
+  completeAp2SessionAfterAllowance,
   fetchAp2Session,
-  setupAp2Session,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
@@ -48,6 +48,7 @@ export default function HomePage() {
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
   const autoNewChatForAccount = useRef<string | null>(null);
   const chatRequestId = useRef(0);
+  const ap2SetupRequestId = useRef(0);
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
@@ -72,6 +73,7 @@ export default function HomePage() {
     async (id: string) => {
       if (!accountId) return;
       chatRequestId.current += 1;
+      ap2SetupRequestId.current += 1;
       setLoading(false);
       setPipelineStatus(null);
       setJobProgress(null);
@@ -115,6 +117,7 @@ export default function HomePage() {
 
   const startNewChat = useCallback(() => {
     chatRequestId.current += 1;
+    ap2SetupRequestId.current += 1;
     setLoading(false);
     setPipelineStatus(null);
     setJobProgress(null);
@@ -213,13 +216,19 @@ export default function HomePage() {
     return thread.id;
   }
 
-  async function runAp2Setup(includeNftAssociate = false): Promise<Ap2SessionState | null> {
+  async function runAp2Setup(): Promise<Ap2SessionState | null> {
     if (!accountId) {
       setAp2SetupError("Connect HashPack before authorizing.");
       return null;
     }
+    const requestId = ++ap2SetupRequestId.current;
+    const isStale = () => requestId !== ap2SetupRequestId.current;
+    const setStatus = (msg: string) => {
+      if (!isStale()) setAp2SetupStatus(msg);
+    };
+
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Open HashPack to approve allowance…");
+    setAp2SetupStatus("Checking allowance…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
@@ -228,23 +237,23 @@ export default function HomePage() {
         throw new Error("Connect HashPack first, then authorize the AP2 session.");
       }
 
-      const onStep = (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg);
-      const allowanceTxId = await approveAp2Allowance(accountId, onStep, {
-        requireWalletApproval: true,
-      });
+      const onStep = (_step: Ap2SetupStep, msg: string) => setStatus(msg);
+      const allowanceTxId = await approveAp2Allowance(accountId, onStep);
+      if (isStale()) return null;
 
-      setAp2SetupStatus("Creating chat thread…");
+      setStatus("Allowance confirmed. Creating chat thread…");
       const tid = await ensureThreadId();
+      if (isStale()) return null;
       if (!tid) throw new Error("Could not create chat thread");
 
-      const session = await setupAp2Session({
+      const session = await completeAp2SessionAfterAllowance({
         threadId: tid,
         userAccountId: accountId,
         intent: useCase || "POCU chat and on-chain ML training",
-        includeNftAssociate,
         allowanceTxId,
         onStep,
       });
+      if (isStale()) return null;
       if (session.status !== "active") {
         throw new Error(`AP2 session not active (status=${session.status})`);
       }
@@ -255,12 +264,15 @@ export default function HomePage() {
       setAp2SetupError(null);
       return session;
     } catch (e) {
+      if (isStale()) return null;
       const msg = e instanceof Error ? e.message : String(e);
       setAp2SetupError(msg);
       setAgentError(msg);
       return null;
     } finally {
-      setAp2SetupLoading(false);
+      if (requestId === ap2SetupRequestId.current) {
+        setAp2SetupLoading(false);
+      }
     }
   }
 
@@ -505,7 +517,7 @@ export default function HomePage() {
         setupLoading={ap2SetupLoading}
         setupStatus={ap2SetupStatus}
         setupError={ap2SetupError}
-        onAuthorize={() => void runAp2Setup(false)}
+        onAuthorize={() => void runAp2Setup()}
         onOpenSetup={() => {
           setAp2SetupError(null);
           setShowAp2Setup(true);

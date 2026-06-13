@@ -9,7 +9,7 @@ import {
   TokenId,
 } from "@hiero-ledger/sdk";
 import { ALLOWANCE_HBAR, requireWalletConfig } from "./config";
-import { fetchHbarAllowance, isTokenAssociated } from "./mirror";
+import { fetchHbarAllowance, isTokenAssociated, waitForHbarAllowance } from "./mirror";
 import { pauseBetweenWalletSteps, walletSignAndExecute } from "./wallet-tx";
 
 export interface Ap2SessionState {
@@ -24,6 +24,8 @@ export interface Ap2SessionState {
 export type Ap2SetupStep = "allowance" | "associate" | "activate";
 
 const AGENT_FETCH_TIMEOUT_MS = 90_000;
+const MIRROR_ALLOWANCE_TIMEOUT_MS = 90_000;
+const MIRROR_ALLOWANCE_INTERVAL_MS = 2_000;
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -53,36 +55,70 @@ const STEP_MESSAGES: Record<Ap2SetupStep, string> = {
   activate: "Activating AP2 session with agent…",
 };
 
+function buildAllowanceTransaction(userAccountId: string, agentAccountId: string) {
+  return new AccountAllowanceApproveTransaction()
+    .approveHbarAllowance(
+      AccountId.fromString(userAccountId),
+      AccountId.fromString(agentAccountId),
+      Hbar.from(ALLOWANCE_HBAR, HbarUnit.Hbar)
+    )
+    .setTransactionMemo(`POCU AP2 session allowance ${ALLOWANCE_HBAR} HBAR`);
+}
+
+/** Race HashPack sign vs mirror poll — proceeds when allowance is visible on-chain. */
 export async function approveAp2Allowance(
   userAccountId: string,
-  onStep?: (step: Ap2SetupStep, message: string) => void,
-  options?: { requireWalletApproval?: boolean }
+  onStep?: (step: Ap2SetupStep, message: string) => void
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
 
-  if (!options?.requireWalletApproval) {
-    const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
-    if (existing >= ALLOWANCE_HBAR) {
-      onStep?.(
-        "allowance",
-        `HBAR allowance already approved (${existing} HBAR) — no wallet step needed.`
-      );
-      return "existing_allowance";
-    }
+  const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
+  if (existing >= ALLOWANCE_HBAR) {
+    onStep?.("allowance", `Allowance confirmed (${existing} HBAR on-chain).`);
+    return "existing_allowance";
   }
 
   onStep?.("allowance", STEP_MESSAGES.allowance);
-  return walletSignAndExecute(
-    userAccountId,
-    new AccountAllowanceApproveTransaction()
-      .approveHbarAllowance(
-        AccountId.fromString(userAccountId),
-        AccountId.fromString(agentAccountId),
-        Hbar.from(ALLOWANCE_HBAR, HbarUnit.Hbar)
-      )
-      .setTransactionMemo(`POCU AP2 session allowance ${ALLOWANCE_HBAR} HBAR`),
-    "AP2 session allowance"
-  );
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (txId: string) => {
+      if (settled) return;
+      settled = true;
+      resolve(txId);
+    };
+
+    walletSignAndExecute(
+      userAccountId,
+      buildAllowanceTransaction(userAccountId, agentAccountId),
+      "AP2 session allowance"
+    )
+      .then(finish)
+      .catch(() => {
+        /* WalletConnect may hang or fail after user approves — mirror poll can still win. */
+      });
+
+    waitForHbarAllowance(
+      userAccountId,
+      agentAccountId,
+      ALLOWANCE_HBAR,
+      MIRROR_ALLOWANCE_TIMEOUT_MS,
+      MIRROR_ALLOWANCE_INTERVAL_MS,
+      () =>
+        onStep?.("allowance", "Waiting for allowance confirmation on-chain…")
+    )
+      .then(() => finish("mirror_confirmed"))
+      .catch(async (err) => {
+        if (settled) return;
+        const final = await fetchHbarAllowance(userAccountId, agentAccountId);
+        if (final >= ALLOWANCE_HBAR) {
+          finish("mirror_confirmed");
+          return;
+        }
+        settled = true;
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
+  });
 }
 
 export async function associateModelNftIfNeeded(
@@ -141,7 +177,7 @@ export async function activateAp2Session(params: {
   allowanceTxId: string;
   onStep?: (step: Ap2SetupStep, message: string) => void;
 }): Promise<Ap2SessionState> {
-  params.onStep?.("activate", STEP_MESSAGES.activate);
+  params.onStep?.("activate", "Activating session…");
   const res = await fetchWithTimeout(
     `/api/ap2/sessions/${params.sessionId}/activate`,
     {
@@ -156,6 +192,28 @@ export async function activateAp2Session(params: {
   );
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Ap2SessionState;
+}
+
+export async function completeAp2SessionAfterAllowance(params: {
+  threadId: string;
+  userAccountId: string;
+  allowanceTxId: string;
+  intent?: string;
+  onStep?: (step: Ap2SetupStep, message: string) => void;
+}): Promise<Ap2SessionState> {
+  params.onStep?.("activate", "Creating AP2 session (signing mandates)…");
+  const pending = await createAp2Session({
+    threadId: params.threadId,
+    userAccountId: params.userAccountId,
+    intent: params.intent,
+  });
+
+  return activateAp2Session({
+    sessionId: pending.session_id,
+    userAccountId: params.userAccountId,
+    allowanceTxId: params.allowanceTxId,
+    onStep: params.onStep,
+  });
 }
 
 export async function setupAp2Session(params: {
@@ -176,18 +234,12 @@ export async function setupAp2Session(params: {
     await pauseBetweenWalletSteps();
   }
 
-  params.onStep?.("activate", "Creating AP2 session…");
-  const pending = await createAp2Session({
+  return completeAp2SessionAfterAllowance({
     threadId: params.threadId,
     userAccountId: params.userAccountId,
-    intent: params.intent,
-  });
-
-  return activateAp2Session({
-    sessionId: pending.session_id,
-    userAccountId: params.userAccountId,
     allowanceTxId,
-    onStep: (step, msg) => params.onStep?.(step, msg),
+    intent: params.intent,
+    onStep: params.onStep,
   });
 }
 

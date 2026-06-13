@@ -5,6 +5,9 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "test:unit": "vitest run",
+    "test:ap2-flow": "node scripts/test-ap2-authorize-flow.mjs",
+    "test:wallet-encoding": "node scripts/test-wallet-encoding.mjs",
     "deploy": "hardhat run scripts/deploy.ts --network testnet",
     "deploy:hts": "hardhat run scripts/deploy-hts-model-collection.ts --network testnet",
     "train": "hardhat run scripts/train.ts --network testnet",
@@ -32,7 +35,8 @@
     "ethers": "^6.13.4",
     "hardhat": "^2.22.17",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.81.0",

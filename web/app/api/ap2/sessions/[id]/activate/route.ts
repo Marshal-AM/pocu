@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const AGENT_URL = process.env.AGENT_SERVICE_URL ?? "http://127.0.0.1:8000";
+const UPSTREAM_TIMEOUT_MS = 90_000;
 
 export async function POST(
   req: NextRequest,
@@ -12,6 +13,7 @@ export async function POST(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
   const text = await res.text();
   return new NextResponse(text, {

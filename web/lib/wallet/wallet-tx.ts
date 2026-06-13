@@ -4,7 +4,7 @@ import { AccountId, Hbar, type Transaction, type TransactionResponse } from "@hi
 import { ensureWalletReadyForSigning } from "./hashpack-connect";
 import { getDAppConnector } from "./hedera-wallet";
 
-const WALLET_TIMEOUT_MS = 600_000; // 10 minutes (HashPack / ACP wallet steps)
+const WALLET_TIMEOUT_MS = 120_000; // 2 minutes — mirror poll recovers if WC hangs after approve
 
 export function withWalletTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
