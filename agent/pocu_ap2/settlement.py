@@ -33,29 +33,51 @@ def execute_hbar_allowance_transfer(
     if amount_tinybars <= 0:
         return ""
 
-    from hiero_sdk_python import AccountId, Client, Hbar, Network, PrivateKey, TransferTransaction
+    from hiero_sdk_python import (
+        AccountId,
+        Client,
+        Hbar,
+        Network,
+        PrivateKey,
+        ResponseCode,
+        TransferTransaction,
+    )
 
-    pk = os.getenv("PRIVATE_KEY") or os.getenv("DER_ENCODED_PRIVATE_KEY", "")
+    pk = (
+        os.getenv("HEX_ENCODED_PRIVATE_KEY")
+        or os.getenv("PRIVATE_KEY")
+        or os.getenv("DER_ENCODED_PRIVATE_KEY", "")
+    )
     operator_id = os.getenv("ACCOUNT_ID", agent_account_id)
     if not pk:
-        raise RuntimeError("Agent PRIVATE_KEY required for AP2 settlement")
+        raise RuntimeError(
+            "Agent Hedera private key required for AP2 settlement "
+            "(HEX_ENCODED_PRIVATE_KEY, PRIVATE_KEY, or DER_ENCODED_PRIVATE_KEY)"
+        )
+
+    if pk.startswith("0x"):
+        private_key = PrivateKey.from_string_ecdsa(pk)
+    else:
+        private_key = PrivateKey.from_string(pk)
 
     client = Client(Network(network="testnet"))
-    client.set_operator(AccountId.from_string(operator_id), PrivateKey.from_string(pk))
+    client.set_operator(AccountId.from_string(operator_id), private_key)
 
     tx = (
         TransferTransaction()
-        .addApprovedHbarTransfer(
-            AccountId.from_string(owner_account_id), Hbar.fromTinybars(-amount_tinybars)
+        .add_approved_hbar_transfer(
+            AccountId.from_string(owner_account_id), Hbar.from_tinybars(-amount_tinybars)
         )
-        .addHbarTransfer(AccountId.from_string(agent_account_id), Hbar.fromTinybars(amount_tinybars))
-        .setTransactionMemo(memo[:100])
+        .add_hbar_transfer(
+            AccountId.from_string(agent_account_id), Hbar.from_tinybars(amount_tinybars)
+        )
+        .set_transaction_memo(memo[:100])
     )
-    response = tx.execute(client)
-    receipt = response.getReceipt(client)
-    if "SUCCESS" not in str(receipt.status):
-        raise RuntimeError(f"AP2 Hedera settlement failed: {receipt.status}")
-    return str(response.transaction_id)
+    receipt = tx.execute(client)
+    if receipt.status != ResponseCode.SUCCESS:
+        status = getattr(ResponseCode(receipt.status), "name", str(receipt.status))
+        raise RuntimeError(f"AP2 Hedera settlement failed: {status}")
+    return str(tx.transaction_id)
 
 
 def load_open_payment_mandate(session: dict[str, Any]) -> OpenPaymentMandate:
