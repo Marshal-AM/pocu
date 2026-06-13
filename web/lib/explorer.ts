@@ -36,7 +36,7 @@ export function hashscanFromNativeTransactionId(txId: string): string | null {
   const [secs, nanos] = tsPart.split(".");
   if (!secs || !nanos) return null;
   const tid = `${account}-${secs}-${nanos}`;
-  return `${baseUrl()}/transaction/${secs}.${nanos}?tid=${encodeURIComponent(tid)}`;
+  return `${baseUrl()}/transaction/${encodeURIComponent(tid)}`;
 }
 
 export function hashscanAccount(accountId: string): string {
