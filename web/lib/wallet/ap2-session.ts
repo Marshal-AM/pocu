@@ -65,20 +65,32 @@ function buildAllowanceTransaction(userAccountId: string, agentAccountId: string
     .setTransactionMemo(`POCU AP2 session allowance ${ALLOWANCE_HBAR} HBAR`);
 }
 
-/** Race HashPack sign vs mirror poll — proceeds when allowance is visible on-chain. */
-export async function approveAp2Allowance(
+/** Always opens HashPack for session authorize; mirror poll only when allowance not yet on-chain. */
+export async function authorizeSessionAllowance(
   userAccountId: string,
   onStep?: (step: Ap2SetupStep, message: string) => void
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
-
-  const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
-  if (existing >= ALLOWANCE_HBAR) {
-    onStep?.("allowance", `Allowance confirmed (${existing} HBAR on-chain).`);
-    return "existing_allowance";
-  }
+  const baseline = await fetchHbarAllowance(userAccountId, agentAccountId);
 
   onStep?.("allowance", STEP_MESSAGES.allowance);
+
+  const walletTx = () =>
+    walletSignAndExecute(
+      userAccountId,
+      buildAllowanceTransaction(userAccountId, agentAccountId),
+      "AP2 session allowance"
+    );
+
+  if (baseline >= ALLOWANCE_HBAR) {
+    try {
+      return await walletTx();
+    } catch (e) {
+      const final = await fetchHbarAllowance(userAccountId, agentAccountId);
+      if (final >= ALLOWANCE_HBAR) return "existing_allowance";
+      throw e;
+    }
+  }
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
@@ -88,14 +100,10 @@ export async function approveAp2Allowance(
       resolve(txId);
     };
 
-    walletSignAndExecute(
-      userAccountId,
-      buildAllowanceTransaction(userAccountId, agentAccountId),
-      "AP2 session allowance"
-    )
+    walletTx()
       .then(finish)
       .catch(() => {
-        /* WalletConnect may hang or fail after user approves — mirror poll can still win. */
+        /* WalletConnect may hang after user approves — mirror poll can still win. */
       });
 
     waitForHbarAllowance(
@@ -119,6 +127,14 @@ export async function approveAp2Allowance(
         reject(err instanceof Error ? err : new Error(String(err)));
       });
   });
+}
+
+/** @deprecated use authorizeSessionAllowance for session authorize */
+export async function approveAp2Allowance(
+  userAccountId: string,
+  onStep?: (step: Ap2SetupStep, message: string) => void
+): Promise<string> {
+  return authorizeSessionAllowance(userAccountId, onStep);
 }
 
 export async function associateModelNftIfNeeded(
@@ -226,7 +242,7 @@ export async function setupAp2Session(params: {
 }): Promise<Ap2SessionState> {
   const allowanceTxId =
     params.allowanceTxId ??
-    (await approveAp2Allowance(params.userAccountId, params.onStep));
+    (await authorizeSessionAllowance(params.userAccountId, params.onStep));
   await pauseBetweenWalletSteps();
 
   if (params.includeNftAssociate) {

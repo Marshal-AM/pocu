@@ -14,13 +14,14 @@ import {
   storeAp2Session,
 } from "../components/WalletProvider";
 import {
-  approveAp2Allowance,
+  authorizeSessionAllowance,
   associateModelNftIfNeeded,
   completeAp2SessionAfterAllowance,
   fetchAp2Session,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
+import { ensureWalletReadyForSigning } from "@/lib/wallet/hashpack-connect";
 
 export default function HomePage() {
   const [architectures, setArchitectures] = useState<Architecture[]>([]);
@@ -228,17 +229,21 @@ export default function HomePage() {
     };
 
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Checking allowance…");
+    setAp2SetupStatus("Open HashPack to approve 200 HBAR allowance…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
-      const { getConnectedAccountId } = await import("@/lib/wallet/hedera-wallet");
+      const { getConnectedAccountId, getDAppConnector } = await import(
+        "@/lib/wallet/hedera-wallet"
+      );
+      const dApp = await getDAppConnector();
+      await ensureWalletReadyForSigning(dApp);
       if (!getConnectedAccountId()) {
         throw new Error("Connect HashPack first, then authorize the AP2 session.");
       }
 
       const onStep = (_step: Ap2SetupStep, msg: string) => setStatus(msg);
-      const allowanceTxId = await approveAp2Allowance(accountId, onStep);
+      const allowanceTxId = await authorizeSessionAllowance(accountId, onStep);
       if (isStale()) return null;
 
       setStatus("Allowance confirmed. Creating chat thread…");

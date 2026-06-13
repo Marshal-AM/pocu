@@ -33,45 +33,60 @@ vi.mock("@/lib/wallet/wallet-tx", () => ({
   pauseBetweenWalletSteps: vi.fn().mockResolvedValue(undefined),
 }));
 
-describe("approveAp2Allowance", () => {
+describe("authorizeSessionAllowance", () => {
   beforeEach(() => {
     fetchHbarAllowance.mockReset();
     waitForHbarAllowance.mockReset();
     walletSignAndExecute.mockReset();
+    vi.resetModules();
   });
 
   afterEach(() => {
     vi.clearAllTimers();
   });
 
-  it("skips wallet when mirror already shows sufficient allowance", async () => {
+  it("always calls wallet when mirror already shows sufficient allowance", async () => {
     fetchHbarAllowance.mockResolvedValue(200);
-    const { approveAp2Allowance } = await import("@/lib/wallet/ap2-session");
-    const result = await approveAp2Allowance("0.0.9211283");
-    expect(result).toBe("existing_allowance");
-    expect(walletSignAndExecute).not.toHaveBeenCalled();
+    walletSignAndExecute.mockResolvedValue("0.0.9211283@1.2");
+
+    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
+    const result = await authorizeSessionAllowance("0.0.9211283");
+    expect(result).toBe("0.0.9211283@1.2");
+    expect(walletSignAndExecute).toHaveBeenCalledOnce();
     expect(waitForHbarAllowance).not.toHaveBeenCalled();
   });
 
-  it("returns mirror_confirmed when mirror poll wins the race", async () => {
+  it("falls back to existing_allowance when wallet fails but on-chain allowance remains", async () => {
+    fetchHbarAllowance.mockResolvedValue(200);
+    walletSignAndExecute.mockRejectedValue(new Error("wallet timeout"));
+
+    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
+    const result = await authorizeSessionAllowance("0.0.9211283");
+    expect(result).toBe("existing_allowance");
+    expect(walletSignAndExecute).toHaveBeenCalledOnce();
+    expect(waitForHbarAllowance).not.toHaveBeenCalled();
+  });
+
+  it("returns mirror_confirmed when mirror poll wins while wallet hangs", async () => {
     fetchHbarAllowance.mockResolvedValue(0);
     walletSignAndExecute.mockReturnValue(new Promise(() => {}));
     waitForHbarAllowance.mockResolvedValue(200);
 
-    const { approveAp2Allowance } = await import("@/lib/wallet/ap2-session");
-    const result = await approveAp2Allowance("0.0.9211283");
+    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
+    const result = await authorizeSessionAllowance("0.0.9211283");
     expect(result).toBe("mirror_confirmed");
     expect(walletSignAndExecute).toHaveBeenCalledOnce();
     expect(waitForHbarAllowance).toHaveBeenCalledOnce();
   });
 
-  it("returns wallet tx id when wallet resolves first", async () => {
+  it("returns wallet tx id when wallet resolves first with no prior allowance", async () => {
     fetchHbarAllowance.mockResolvedValue(0);
     walletSignAndExecute.mockResolvedValue("0.0.9211283@1.2");
     waitForHbarAllowance.mockReturnValue(new Promise(() => {}));
 
-    const { approveAp2Allowance } = await import("@/lib/wallet/ap2-session");
-    const result = await approveAp2Allowance("0.0.9211283");
+    const { authorizeSessionAllowance } = await import("@/lib/wallet/ap2-session");
+    const result = await authorizeSessionAllowance("0.0.9211283");
     expect(result).toBe("0.0.9211283@1.2");
+    expect(waitForHbarAllowance).toHaveBeenCalledOnce();
   });
 });
