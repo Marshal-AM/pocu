@@ -47,6 +47,7 @@ export default function HomePage() {
   const [ap2SetupError, setAp2SetupError] = useState<string | null>(null);
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
   const autoNewChatForAccount = useRef<string | null>(null);
+  const chatRequestId = useRef(0);
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
@@ -70,6 +71,10 @@ export default function HomePage() {
   const loadThread = useCallback(
     async (id: string) => {
       if (!accountId) return;
+      chatRequestId.current += 1;
+      setLoading(false);
+      setPipelineStatus(null);
+      setJobProgress(null);
       try {
         const res = await fetch(
           `/api/threads/${id}?account_id=${encodeURIComponent(accountId)}`
@@ -109,6 +114,10 @@ export default function HomePage() {
   );
 
   const startNewChat = useCallback(() => {
+    chatRequestId.current += 1;
+    setLoading(false);
+    setPipelineStatus(null);
+    setJobProgress(null);
     setThreadId(null);
     if (threadStorageKey) localStorage.removeItem(threadStorageKey);
     setChat([]);
@@ -167,8 +176,12 @@ export default function HomePage() {
     }
   }, [accountId, walletReady, loadThreads, startNewChat, setAp2Session]);
 
-  function upsertAssistantBlock(updater: (block: ChatBlock) => ChatBlock) {
+  function upsertAssistantBlock(
+    updater: (block: ChatBlock) => ChatBlock,
+    requestId: number
+  ) {
     setChat((c) => {
+      if (requestId !== chatRequestId.current) return c;
       const next = [...c];
       const last = next[next.length - 1];
       if (last?.role === "assistant") {
@@ -305,7 +318,11 @@ export default function HomePage() {
     }
 
     if (!overrideMessage) setMessage("");
-    setChat((c) => [...c, { role: "user", text: userMsg }]);
+    const requestId = ++chatRequestId.current;
+    setChat((c) => {
+      if (requestId !== chatRequestId.current) return c;
+      return [...c, { role: "user", text: userMsg }];
+    });
     setLoading(true);
     setAgentError(null);
     setPipelineStatus(null);
@@ -397,35 +414,50 @@ export default function HomePage() {
                 setAgentPickedArch(Boolean(event.auto));
               }
             } else if (event.type === "text" && event.content) {
-              upsertAssistantBlock((block) => ({
-                ...block,
-                text: (block.text ?? "") + event.content,
-              }));
+              upsertAssistantBlock(
+                (block) => ({
+                  ...block,
+                  text: (block.text ?? "") + event.content,
+                }),
+                requestId
+              );
             } else if (event.type === "dataset" && event.dataset) {
-              upsertAssistantBlock((block) => ({
-                ...block,
-                dataset: event.dataset,
-                datasets: undefined,
-              }));
+              upsertAssistantBlock(
+                (block) => ({
+                  ...block,
+                  dataset: event.dataset,
+                  datasets: undefined,
+                }),
+                requestId
+              );
             } else if (event.type === "datasets" && event.datasets?.length) {
-              upsertAssistantBlock((block) => ({
-                ...block,
-                datasets: event.datasets,
-                dataset: undefined,
-              }));
+              upsertAssistantBlock(
+                (block) => ({
+                  ...block,
+                  datasets: event.datasets,
+                  dataset: undefined,
+                }),
+                requestId
+              );
             } else if (
               (event.type === "job" || event.type === "job_status") &&
               event.job
             ) {
-              upsertAssistantBlock((block) => ({
-                ...block,
-                job: event.job,
-              }));
+              upsertAssistantBlock(
+                (block) => ({
+                  ...block,
+                  job: event.job,
+                }),
+                requestId
+              );
             } else if (event.content) {
-              upsertAssistantBlock((block) => ({
-                ...block,
-                text: (block.text ?? "") + event.content,
-              }));
+              upsertAssistantBlock(
+                (block) => ({
+                  ...block,
+                  text: (block.text ?? "") + event.content,
+                }),
+                requestId
+              );
             }
           } catch {
             /* skip */
@@ -434,22 +466,29 @@ export default function HomePage() {
       }
 
       setChat((c) => {
+        if (requestId !== chatRequestId.current) return c;
         const last = c[c.length - 1];
         if (last?.role === "assistant") return c;
+        if (last?.role !== "user") return c;
         return [...c, { role: "assistant", text: "No response from agent." }];
       });
     } catch (e) {
-      setChat((c) => [
-        ...c,
-        {
-          role: "assistant",
-          text: `Error: ${e instanceof Error ? e.message : e}`,
-        },
-      ]);
+      setChat((c) => {
+        if (requestId !== chatRequestId.current) return c;
+        return [
+          ...c,
+          {
+            role: "assistant",
+            text: `Error: ${e instanceof Error ? e.message : e}`,
+          },
+        ];
+      });
     } finally {
-      setLoading(false);
-      setPipelineStatus(null);
-      void loadThreads();
+      if (requestId === chatRequestId.current) {
+        setLoading(false);
+        setPipelineStatus(null);
+        void loadThreads();
+      }
     }
   }
 
