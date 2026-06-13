@@ -206,7 +206,7 @@ export default function HomePage() {
       return null;
     }
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Checking allowance…");
+    setAp2SetupStatus("Open HashPack to approve allowance…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
@@ -216,7 +216,9 @@ export default function HomePage() {
       }
 
       const onStep = (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg);
-      const allowanceTxId = await approveAp2Allowance(accountId, onStep);
+      const allowanceTxId = await approveAp2Allowance(accountId, onStep, {
+        requireWalletApproval: true,
+      });
 
       setAp2SetupStatus("Creating chat thread…");
       const tid = await ensureThreadId();

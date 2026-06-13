@@ -55,17 +55,20 @@ const STEP_MESSAGES: Record<Ap2SetupStep, string> = {
 
 export async function approveAp2Allowance(
   userAccountId: string,
-  onStep?: (step: Ap2SetupStep, message: string) => void
+  onStep?: (step: Ap2SetupStep, message: string) => void,
+  options?: { requireWalletApproval?: boolean }
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
 
-  const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
-  if (existing >= ALLOWANCE_HBAR) {
-    onStep?.(
-      "allowance",
-      `HBAR allowance already approved (${existing} HBAR) — no wallet step needed.`
-    );
-    return "existing_allowance";
+  if (!options?.requireWalletApproval) {
+    const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
+    if (existing >= ALLOWANCE_HBAR) {
+      onStep?.(
+        "allowance",
+        `HBAR allowance already approved (${existing} HBAR) — no wallet step needed.`
+      );
+      return "existing_allowance";
+    }
   }
 
   onStep?.("allowance", STEP_MESSAGES.allowance);
