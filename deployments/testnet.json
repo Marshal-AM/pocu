@@ -1,0 +1,18 @@
+{
+  "network": "testnet",
+  "txHarvester": "0xeCd38DCDC07870C42023C287C08Ac9C80C7970dF",
+  "cpuJobRegistry": "0xE6aa3cc8cE128fef0731cea6dAd9cC83a34bc4d1",
+  "cpuBatchExecutor": "0x374184e818e8fc759E75f02694b6973339eC1aaF",
+  "modelRegistry": "0xe28fa5222bf04bE12eD0A707409ecA21B28cAC80",
+  "cores": {
+    "linear": "0x552b7463A82823113Bf6c4fB10562F50A29170Ac",
+    "activation": "0xf74C88E243453FaE52B42744B56897e6AB327516",
+    "gradient": "0xeE40905155B15947bc8A2da889596EE9253506B3",
+    "optimizer": "0x4B3C6aDCd6F6F5439c3Ead8C2DBAeCf8A1B089E6",
+    "aggregation": "0xec0f13F9b5ceb6c8E4EbD7E58dc43B3b34FdA348"
+  },
+  "inputDim": 6,
+  "hcsTopicId": "0.0.9191580",
+  "deployedAt": "2026-06-11T15:24:18.176Z",
+  "trainingMode": "onchain-cpu"
+}

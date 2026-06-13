@@ -2,6 +2,10 @@ import { ethers } from "ethers";
 import { StepLogger } from "../logger";
 
 const HBAR_TINYBARS = 100_000_000;
+const SETTLE_FETCH_TIMEOUT_MS = parseInt(
+  process.env.AP2_SETTLE_TIMEOUT_MS ?? "120000",
+  10
+);
 
 export function gasCostFromReceipt(receipt: {
   gasUsed: bigint;
@@ -38,16 +42,31 @@ export async function settleBatchViaAgent(params: {
   const amountTinybars = hbarToTinybars(batchHbar);
   const reason = `training_batch_${params.batchIndex}`;
 
-  const res = await fetch(`${agentUrl}/ap2/sessions/${params.sessionId}/settle`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      amount_tinybars: amountTinybars,
-      reason,
-      batch_index: params.batchIndex,
-      job_id: params.jobId,
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SETTLE_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${agentUrl}/ap2/sessions/${params.sessionId}/settle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount_tinybars: amountTinybars,
+        reason,
+        batch_index: params.batchIndex,
+        job_id: params.jobId,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(
+        `[ap2] batch settle timed out after ${SETTLE_FETCH_TIMEOUT_MS}ms — is the agent running on ${agentUrl}?`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`[ap2] batch settle failed (${res.status}): ${detail}`);

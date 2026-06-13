@@ -1,0 +1,11 @@
+{
+  "modelNftTokenId": "0.0.9211401",
+  "tokenName": "POCU Model NFT",
+  "tokenSymbol": "MODEL",
+  "network": "testnet",
+  "treasuryAccountId": "0.0.6111100",
+  "maxSupply": 100000,
+  "deployedAt": "2026-06-12T15:03:48.097Z",
+  "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9211401",
+  "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9211401"
+}

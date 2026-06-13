@@ -29,6 +29,9 @@ from tools_impl import (
 )
 from llm_context import compact_tool_result, prune_messages, trim_history, truncate_text
 
+# Injected into trigger_training_job_tool when the LLM tool path is used.
+_tool_ap2_context: dict[str, str] = {}
+
 # Hedera Agent Kit
 HEDERA_TOOLS: list = []
 _hedera_client = None
@@ -384,6 +387,8 @@ def trigger_training_job_tool(
         target_column,
         prepared,
         user_prompt,
+        ap2_session_id=_tool_ap2_context.get("ap2_session_id", ""),
+        user_account_id=_tool_ap2_context.get("user_account_id", ""),
     )
     return json.dumps(result, indent=2)
 
@@ -657,6 +662,30 @@ async def _run_tool(fn: Any, args: dict[str, Any]) -> str:
 
 
 async def run_agent_chat(
+    message: str,
+    use_case: str,
+    architecture_id: str,
+    history: Optional[list[dict[str, str]]] = None,
+    ap2_session_id: str = "",
+    user_account_id: str = "",
+) -> AsyncIterator[dict[str, Any]]:
+    _tool_ap2_context["ap2_session_id"] = ap2_session_id
+    _tool_ap2_context["user_account_id"] = user_account_id
+    try:
+        async for event in _run_agent_chat_inner(
+            message,
+            use_case,
+            architecture_id,
+            history,
+            ap2_session_id,
+            user_account_id,
+        ):
+            yield event
+    finally:
+        _tool_ap2_context.clear()
+
+
+async def _run_agent_chat_inner(
     message: str,
     use_case: str,
     architecture_id: str,

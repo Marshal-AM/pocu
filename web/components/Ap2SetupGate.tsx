@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { CHAT_TURN_HBAR, SESSION_BUDGET_HBAR } from "@/lib/wallet/config";
 import { Ap2SetupModal } from "./Ap2SetupModal";
 
 interface Ap2SetupGateProps {
@@ -50,8 +51,8 @@ export function Ap2SetupGate({
                 AP2 session required
               </p>
               <p className="text-sm text-muted-foreground">
-                Authorize a payment session (200 HBAR budget, 0.1 HBAR per reply) before
-                you can chat or start training.
+                Authorize a payment session ({SESSION_BUDGET_HBAR} HBAR budget,{" "}
+                {CHAT_TURN_HBAR} HBAR per reply) before you can chat or start training.
               </p>
             </div>
             <Button

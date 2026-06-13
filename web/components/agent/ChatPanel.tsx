@@ -16,6 +16,7 @@ import { ThreadSelect } from "@/components/agent/ThreadSelect";
 
 interface ChatPanelProps {
   agentError: string | null;
+  ap2SettlementNote?: string | null;
   threadId: string | null;
   threads: ChatThread[];
   useCase: string;
@@ -49,6 +50,7 @@ interface ChatPanelProps {
 
 export function ChatPanel({
   agentError,
+  ap2SettlementNote,
   threadId,
   threads,
   useCase,
@@ -127,6 +129,12 @@ export function ChatPanel({
         {agentError && (
           <div className="mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive sm:mx-5">
             {agentError}
+          </div>
+        )}
+
+        {ap2SettlementNote && (
+          <div className="mx-4 mt-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm text-foreground sm:mx-5">
+            {ap2SettlementNote}
           </div>
         )}
 

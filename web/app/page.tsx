@@ -15,12 +15,14 @@ import {
 } from "../components/WalletProvider";
 import {
   authorizeSessionAllowance,
-  associateModelNftIfNeeded,
   completeAp2SessionAfterAllowance,
+  ensureAp2ReadyForTraining,
   fetchAp2Session,
+  validateWalletConfigAgainstAgent,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
+import { ALLOWANCE_HBAR } from "@/lib/wallet/config";
 import { ensureWalletReadyForSigning } from "@/lib/wallet/hashpack-connect";
 
 export default function HomePage() {
@@ -46,6 +48,7 @@ export default function HomePage() {
   const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
   const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
   const [ap2SetupError, setAp2SetupError] = useState<string | null>(null);
+  const [ap2SettlementNote, setAp2SettlementNote] = useState<string | null>(null);
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
   const autoNewChatForAccount = useRef<string | null>(null);
   const chatRequestId = useRef(0);
@@ -229,7 +232,7 @@ export default function HomePage() {
     };
 
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Open HashPack to approve 200 HBAR allowance…");
+    setAp2SetupStatus("Checking wallet configuration…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
@@ -242,7 +245,11 @@ export default function HomePage() {
         throw new Error("Connect HashPack first, then authorize the AP2 session.");
       }
 
+      await validateWalletConfigAgainstAgent();
+      if (isStale()) return null;
+
       const onStep = (_step: Ap2SetupStep, msg: string) => setStatus(msg);
+      setStatus(`Open HashPack to approve ${ALLOWANCE_HBAR} HBAR allowance…`);
       const allowanceTxId = await authorizeSessionAllowance(accountId, onStep);
       if (isStale()) return null;
 
@@ -262,8 +269,17 @@ export default function HomePage() {
       if (session.status !== "active") {
         throw new Error(`AP2 session not active (status=${session.status})`);
       }
-      setAp2Session(session);
-      storeAp2Session(accountId, tid, session);
+
+      setStatus("Associating model NFT token (required for training)…");
+      const ready = await ensureAp2ReadyForTraining({
+        userAccountId: accountId,
+        session,
+        onStep,
+      });
+      if (isStale()) return null;
+
+      setAp2Session(ready);
+      storeAp2Session(accountId, tid, ready);
       setShowAp2Setup(false);
       setAp2SetupStatus(null);
       setAp2SetupError(null);
@@ -306,7 +322,6 @@ export default function HomePage() {
         setAgentError("Wallet session expired — reconnect HashPack, then try again.");
         return;
       }
-      await associateModelNftIfNeeded(accountId);
     } catch (e) {
       setAgentError(e instanceof Error ? e.message : String(e));
       return;
@@ -334,6 +349,21 @@ export default function HomePage() {
       return;
     }
 
+    let activeSession: Ap2SessionState;
+    try {
+      activeSession = await ensureAp2ReadyForTraining({
+        userAccountId: accountId,
+        session: ap2Session,
+      });
+      setAp2Session(activeSession);
+      if (threadId) storeAp2Session(accountId, threadId, activeSession);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAgentError(msg);
+      setShowAp2Setup(true);
+      return;
+    }
+
     if (!overrideMessage) setMessage("");
     const requestId = ++chatRequestId.current;
     setChat((c) => {
@@ -342,6 +372,7 @@ export default function HomePage() {
     });
     setLoading(true);
     setAgentError(null);
+    setAp2SettlementNote(null);
     setPipelineStatus(null);
     setJobProgress(null);
 
@@ -367,7 +398,7 @@ export default function HomePage() {
           thread_id: threadId,
           history,
           user_account_id: accountId,
-          ap2_session_id: ap2Session.session_id,
+          ap2_session_id: activeSession.session_id,
         }),
       });
 
@@ -398,6 +429,8 @@ export default function HomePage() {
               message?: string;
               status?: string;
               progress_pct?: number;
+              amount_hbar?: number;
+              hedera_tx_id?: string;
               dataset?: ChatBlock["dataset"];
               datasets?: ChatBlock["datasets"];
               job?: ChatBlock["job"];
@@ -409,6 +442,11 @@ export default function HomePage() {
 
             if (event.type === "status" && event.message) {
               setPipelineStatus(event.message);
+            } else if (event.type === "ap2_settlement") {
+              const amt =
+                event.amount_hbar != null ? `${event.amount_hbar} HBAR` : "HBAR";
+              const tx = event.hedera_tx_id ? ` (tx ${event.hedera_tx_id})` : "";
+              setAp2SettlementNote(`AP2 payment: ${amt} debited from allowance${tx}`);
             } else if (event.type === "job_progress") {
               setJobProgress({
                 status: event.status,
@@ -420,6 +458,9 @@ export default function HomePage() {
               setThreadId(event.thread_id);
               if (threadStorageKey) {
                 localStorage.setItem(threadStorageKey, event.thread_id);
+              }
+              if (accountId && activeSession) {
+                storeAp2Session(accountId, event.thread_id, activeSession);
               }
             } else if (event.type === "selection") {
               if (event.use_case) {
@@ -538,6 +579,7 @@ export default function HomePage() {
       >
         <ChatPanel
           agentError={agentError}
+          ap2SettlementNote={ap2SettlementNote}
           threadId={threadId}
           threads={threads}
           useCase={useCase}

@@ -22,8 +22,7 @@ dist/
 coverage/
 
 # Chain deployment state (local credentials / addresses)
-deployments/testnet.json
-deployments/hts.json
+
 
 # --- Training & job runtime outputs ---
 output/

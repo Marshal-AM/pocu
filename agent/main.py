@@ -132,6 +132,22 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ap2/config")
+def ap2_config() -> dict[str, Any]:
+    import os
+
+    agent_account_id = (os.getenv("ACCOUNT_ID") or "").strip()
+    model_nft_token_id = (os.getenv("MODEL_NFT_TOKEN_ID") or "").strip()
+    allowance_hbar = float(os.getenv("ALLOWANCE_HBAR", "200"))
+    if not agent_account_id:
+        raise HTTPException(500, "ACCOUNT_ID not configured on agent")
+    return {
+        "agent_account_id": agent_account_id,
+        "model_nft_token_id": model_nft_token_id,
+        "allowance_hbar": allowance_hbar,
+    }
+
+
 @app.get("/architectures")
 def architectures(tier: Optional[str] = None) -> list[dict[str, Any]]:
     archs = load_architectures()

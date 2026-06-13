@@ -30,14 +30,18 @@ export function Ap2SetupModal({
       <div className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg">
         <h2 className="text-lg font-semibold">Authorize AP2 session</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Click Authorize to open HashPack and approve the {SESSION_BUDGET_HBAR} HBAR
-          allowance for this session. Training later only asks for other wallet steps
-          if needed (e.g. NFT associate), not this allowance again.
+          Authorize opens HashPack for a {SESSION_BUDGET_HBAR} HBAR allowance, activates your AP2
+          session, and associates the model NFT token (required before training).
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           <li>Session budget: up to {SESSION_BUDGET_HBAR} HBAR</li>
-          <li>Each agent reply: {CHAT_TURN_HBAR} HBAR</li>
+          <li>Each agent reply: {CHAT_TURN_HBAR} HBAR (debited from allowance)</li>
           <li>Training batches: actual on-chain gas (metered per batch)</li>
+          <li>
+            Ensure <code className="text-xs">web/.env.local</code> matches root{" "}
+            <code className="text-xs">ACCOUNT_ID</code> and{" "}
+            <code className="text-xs">deployments/hts.json</code>
+          </li>
           <li>Payment rail: HIP-745 HBAR allowance via HashPack</li>
         </ul>
         {statusMessage ? (

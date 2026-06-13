@@ -28,3 +28,26 @@ export function requireWalletConfig(): {
   }
   return { projectId, agentAccountId, network, modelNftTokenId };
 }
+
+export interface AgentAp2Config {
+  agent_account_id: string;
+  model_nft_token_id: string;
+  allowance_hbar: number;
+}
+
+/** Compare web public env against agent-reported config (via /api/ap2/config). */
+export function assertWalletConfigMatchesAgent(expected: AgentAp2Config): void {
+  const { agentAccountId, modelNftTokenId } = requireWalletConfig();
+  if (expected.agent_account_id !== agentAccountId) {
+    throw new Error(
+      `NEXT_PUBLIC_AGENT_ACCOUNT_ID is ${agentAccountId} but agent expects ${expected.agent_account_id}. ` +
+        "Update web/.env.local to match root ACCOUNT_ID."
+    );
+  }
+  if (expected.model_nft_token_id !== modelNftTokenId) {
+    throw new Error(
+      `NEXT_PUBLIC_MODEL_NFT_TOKEN_ID is ${modelNftTokenId} but agent expects ${expected.model_nft_token_id}. ` +
+        "Update web/.env.local from deployments/hts.json."
+    );
+  }
+}

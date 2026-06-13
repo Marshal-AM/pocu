@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Ap2SessionState } from "@/lib/wallet/ap2-session";
+import { normalizeAp2Session } from "@/lib/wallet/ap2-session";
 import {
   connectWallet,
   disconnectWallet,
@@ -39,7 +40,7 @@ export function loadStoredAp2Session(
   try {
     const raw = sessionStorage.getItem(sessionStorageKey(accountId, threadId));
     if (!raw) return null;
-    return JSON.parse(raw) as Ap2SessionState;
+    return normalizeAp2Session(JSON.parse(raw) as Record<string, unknown>);
   } catch {
     return null;
   }

@@ -8,7 +8,14 @@ import {
   TokenAssociateTransaction,
   TokenId,
 } from "@hiero-ledger/sdk";
-import { ALLOWANCE_HBAR, requireWalletConfig } from "./config";
+import {
+  ALLOWANCE_HBAR,
+  CHAT_TURN_HBAR,
+  SESSION_BUDGET_HBAR,
+  assertWalletConfigMatchesAgent,
+  type AgentAp2Config,
+  requireWalletConfig,
+} from "./config";
 import { fetchHbarAllowance, isTokenAssociated, waitForHbarAllowance } from "./mirror";
 import { pauseBetweenWalletSteps, walletSignAndExecute } from "./wallet-tx";
 
@@ -19,6 +26,22 @@ export interface Ap2SessionState {
   chat_turn_hbar?: number;
   remaining_hbar?: number;
   summary?: string;
+}
+
+/** Agent GET returns DB row (`id`); create/activate return `session_id`. */
+export function normalizeAp2Session(raw: Record<string, unknown>): Ap2SessionState {
+  const session_id = String(raw.session_id ?? raw.id ?? "").trim();
+  return {
+    session_id,
+    status: String(raw.status ?? ""),
+    budget_hbar:
+      raw.budget_hbar != null ? Number(raw.budget_hbar) : undefined,
+    chat_turn_hbar:
+      raw.chat_turn_hbar != null ? Number(raw.chat_turn_hbar) : undefined,
+    remaining_hbar:
+      raw.remaining_hbar != null ? Number(raw.remaining_hbar) : undefined,
+    summary: raw.summary != null ? String(raw.summary) : undefined,
+  };
 }
 
 export type Ap2SetupStep = "allowance" | "associate" | "activate";
@@ -184,7 +207,7 @@ export async function createAp2Session(params: {
     "AP2 session creation"
   );
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as Ap2SessionState;
+  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
 }
 
 export async function activateAp2Session(params: {
@@ -207,7 +230,7 @@ export async function activateAp2Session(params: {
     "AP2 session activation"
   );
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as Ap2SessionState;
+  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
 }
 
 export async function completeAp2SessionAfterAllowance(params: {
@@ -268,5 +291,64 @@ export async function fetchAp2Session(
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as Ap2SessionState;
+  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+}
+
+export async function fetchAp2Config(): Promise<AgentAp2Config> {
+  const res = await fetchWithTimeout("/api/ap2/config", {}, "AP2 config fetch");
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as AgentAp2Config;
+}
+
+/** Fail fast when web/.env.local does not match agent + hts deployment. */
+export async function validateWalletConfigAgainstAgent(): Promise<void> {
+  const expected = await fetchAp2Config();
+  assertWalletConfigMatchesAgent(expected);
+}
+
+/**
+ * Re-validate AP2 session on agent + mirror allowance + NFT associate before chat/train.
+ */
+export async function ensureAp2ReadyForTraining(params: {
+  userAccountId: string;
+  session: Ap2SessionState | null;
+  onStep?: (step: Ap2SetupStep, message: string) => void;
+}): Promise<Ap2SessionState> {
+  if (!params.session?.session_id) {
+    throw new Error("Authorize an AP2 session before chatting or training.");
+  }
+
+  await validateWalletConfigAgainstAgent();
+
+  const live = await fetchAp2Session(params.session.session_id, params.userAccountId);
+  if (!live || live.status !== "active") {
+    throw new Error("AP2 session is not active — re-authorize in the setup modal.");
+  }
+
+  const { agentAccountId } = requireWalletConfig();
+  const budgetRemaining =
+    live.remaining_hbar ?? live.budget_hbar ?? SESSION_BUDGET_HBAR;
+  if (budgetRemaining < CHAT_TURN_HBAR) {
+    throw new Error(
+      `Session budget exhausted (${budgetRemaining.toFixed(2)} HBAR remaining). ` +
+        "Re-authorize the AP2 session in HashPack."
+    );
+  }
+
+  const allowance = await fetchHbarAllowance(params.userAccountId, agentAccountId);
+  if (allowance < CHAT_TURN_HBAR) {
+    throw new Error(
+      `Insufficient HBAR allowance (${allowance.toFixed(2)} HBAR on-chain). ` +
+        "Re-authorize the AP2 session in HashPack."
+    );
+  }
+
+  await associateModelNftIfNeeded(params.userAccountId, params.onStep);
+  if (!live.session_id) {
+    return normalizeAp2Session({
+      ...live,
+      session_id: params.session.session_id,
+    });
+  }
+  return live;
 }

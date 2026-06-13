@@ -100,6 +100,8 @@ export default function JobDetailPage() {
   const hcsTopic = String(job.hcs_topic_id ?? "");
   const ipfsUri = String(job.ipfs_uri ?? "");
   const userAccount = String(job.user_account_id ?? "");
+  const ap2SessionId = String(job.ap2_session_id ?? "");
+  const allowanceHbar = job.allowance_hbar != null ? String(job.allowance_hbar) : "";
   const nftToken = job.model_nft_token_id
     ? String(job.model_nft_token_id)
     : "";
@@ -231,6 +233,20 @@ export default function JobDetailPage() {
                   "—"
                 )
               }
+            />
+            <OnChainField
+              label="AP2 session"
+              value={
+                ap2SessionId && ap2SessionId !== "—" ? (
+                  <span className="break-all font-mono text-xs">{ap2SessionId}</span>
+                ) : (
+                  <span className="text-destructive">Not linked — re-authorize and queue a new job</span>
+                )
+              }
+            />
+            <OnChainField
+              label="Allowance cap"
+              value={allowanceHbar ? `${allowanceHbar} HBAR` : "—"}
             />
             <OnChainField
               label="Model NFT"
