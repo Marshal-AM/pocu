@@ -3,7 +3,7 @@
 import { AccountId, Hbar, type Transaction, type TransactionResponse } from "@hiero-ledger/sdk";
 import { getDAppConnector } from "./hedera-wallet";
 
-const WALLET_TIMEOUT_MS = 120_000;
+const WALLET_TIMEOUT_MS = 600_000; // 10 minutes (HashPack / ACP wallet steps)
 
 export function withWalletTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
