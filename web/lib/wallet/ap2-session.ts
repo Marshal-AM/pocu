@@ -28,7 +28,6 @@ export interface Ap2SessionState {
   summary?: string;
 }
 
-/** Agent GET returns DB row (`id`); create/activate return `session_id`. */
 export function normalizeAp2Session(raw: Record<string, unknown>): Ap2SessionState {
   const session_id = String(raw.session_id ?? raw.id ?? "").trim();
   return {
@@ -42,6 +41,22 @@ export function normalizeAp2Session(raw: Record<string, unknown>): Ap2SessionSta
       raw.remaining_hbar != null ? Number(raw.remaining_hbar) : undefined,
     summary: raw.summary != null ? String(raw.summary) : undefined,
   };
+}
+
+/** True when the user must authorize a new AP2 session (expired, inactive, exhausted, etc.). */
+export function requiresAp2Reauthorization(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("ap2 session expired") ||
+    m.includes("ap2 mandate expired") ||
+    m.includes("ap2 session is not active") ||
+    m.includes("ap2 session not found") ||
+    m.includes("complete authorization first") ||
+    m.includes("session budget exhausted") ||
+    m.includes("insufficient hbar allowance") ||
+    m.includes("re-authorize the ap2 session") ||
+    m.includes("authorize an ap2 session")
+  );
 }
 
 export type Ap2SetupStep = "allowance" | "associate" | "activate";

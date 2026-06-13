@@ -1,6 +1,5 @@
 "use client";
 
-import { CHAT_TURN_HBAR, SESSION_BUDGET_HBAR } from "@/lib/wallet/config";
 import { cn } from "@/lib/utils";
 
 interface Ap2AuthorizeOverlayProps {
@@ -8,7 +7,6 @@ interface Ap2AuthorizeOverlayProps {
   statusMessage: string | null;
   errorMessage?: string | null;
   onAuthorize: () => void;
-  onCancel: () => void;
 }
 
 export function Ap2AuthorizeOverlay({
@@ -16,7 +14,6 @@ export function Ap2AuthorizeOverlay({
   statusMessage,
   errorMessage,
   onAuthorize,
-  onCancel,
 }: Ap2AuthorizeOverlayProps) {
   return (
     <div
@@ -34,8 +31,8 @@ export function Ap2AuthorizeOverlay({
           Authorize session
         </h3>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Approve a {SESSION_BUDGET_HBAR} HBAR allowance in HashPack to chat and
-          train. Each reply costs {CHAT_TURN_HBAR} HBAR.
+          Approve this session in HashPack to initialize an AP2 session for this
+          chat.
         </p>
 
         {(loading || statusMessage) && (
@@ -47,20 +44,12 @@ export function Ap2AuthorizeOverlay({
           <p className="mt-3 text-sm text-destructive">{errorMessage}</p>
         )}
 
-        <div className="mt-6 flex gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={loading}
-            className="flex-1 rounded-full border border-border/60 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface hover:text-foreground disabled:opacity-50"
-          >
-            Cancel
-          </button>
+        <div className="mt-6">
           <button
             type="button"
             onClick={onAuthorize}
             disabled={loading}
-            className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
+            className="w-full rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
             {loading ? "Loading.." : "Authorize"}
           </button>

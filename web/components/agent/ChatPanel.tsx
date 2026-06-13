@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PanelRightClose, PanelRightOpen, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Ap2AuthorizeOverlay } from "@/components/Ap2AuthorizeOverlay";
 import type { Ap2Payment, Architecture, ChatBlock, ChatThread } from "@/components/agent/types";
 import { ChatMessage } from "@/components/agent/ChatMessage";
@@ -17,6 +16,7 @@ import { PaymentHistoryModal } from "@/components/agent/PaymentHistoryModal";
 import { PipelineStatus } from "@/components/agent/PipelineStatus";
 import { SetupPanel } from "@/components/agent/SetupPanel";
 import { ThreadList } from "@/components/agent/ThreadList";
+import { useStickToBottom } from "@/lib/hooks/use-stick-to-bottom";
 import { cn } from "@/lib/utils";
 
 interface ChatPanelProps {
@@ -28,7 +28,6 @@ interface ChatPanelProps {
   ap2SetupStatus: string | null;
   ap2SetupError?: string | null;
   onAuthorize: () => void;
-  onDismissAuthorize: () => void;
   threadId: string | null;
   threads: ChatThread[];
   useCase: string;
@@ -70,7 +69,6 @@ export function ChatPanel({
   ap2SetupStatus,
   ap2SetupError,
   onAuthorize,
-  onDismissAuthorize,
   threadId,
   threads,
   useCase,
@@ -105,6 +103,7 @@ export function ChatPanel({
   const [setupOpen, setSetupOpen] = useState(true);
   const [paymentsOpen, setPaymentsOpen] = useState(false);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const { viewportRef, followOutput, enableStickToBottom } = useStickToBottom();
   const chatLocked = !ap2SessionActive;
   const canSend = Boolean(message.trim()) && !loading && ap2SessionActive;
   const isEmpty = chat.length === 0;
@@ -122,6 +121,19 @@ export function ChatPanel({
     } finally {
       setPaymentsLoading(false);
     }
+  }
+
+  useEffect(() => {
+    enableStickToBottom("auto");
+  }, [threadId, enableStickToBottom]);
+
+  useEffect(() => {
+    followOutput();
+  }, [chat, loading, showTyping, followOutput]);
+
+  function handleSend() {
+    enableStickToBottom("auto");
+    onSend();
   }
 
   if (showEmptyLanding) {
@@ -172,7 +184,6 @@ export function ChatPanel({
                 statusMessage={ap2SetupStatus}
                 errorMessage={ap2SetupError}
                 onAuthorize={onAuthorize}
-                onCancel={onDismissAuthorize}
               />
             ) : undefined
           }
@@ -239,7 +250,10 @@ export function ChatPanel({
             </div>
           )}
 
-          <ScrollArea className="min-h-0 flex-1">
+          <div
+            ref={viewportRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          >
             <div className="flex flex-col gap-5 px-5 py-5">
               {isEmpty && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -277,7 +291,7 @@ export function ChatPanel({
 
               {showTyping && <TypingIndicator />}
             </div>
-          </ScrollArea>
+          </div>
 
           {loading && pipelineStatus && (
             <div className="shrink-0 border-t border-border/50 px-5 py-2.5">
@@ -291,7 +305,7 @@ export function ChatPanel({
           <ChatComposer
             value={message}
             onChange={onMessageChange}
-            onSend={onSend}
+            onSend={handleSend}
             disabled={loading || chatLocked}
             loading={loading}
             canSend={canSend}

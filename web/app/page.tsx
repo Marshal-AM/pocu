@@ -15,6 +15,7 @@ import {
   ensureAp2ReadyForTraining,
   fetchAp2PaymentsForThread,
   fetchAp2SessionForThread,
+  requiresAp2Reauthorization,
   validateWalletConfigAgainstAgent,
   type Ap2SessionState,
   type Ap2SetupStep,
@@ -57,6 +58,22 @@ export default function HomePage() {
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
   const ap2SessionActive = ap2Session?.status === "active";
 
+  const invalidateAp2Session = useCallback(() => {
+    setAp2Session(null);
+    setAp2SetupError(null);
+    setAp2SetupStatus(null);
+  }, [setAp2Session]);
+
+  const handleAp2SessionFailure = useCallback(
+    (message: string): boolean => {
+      if (!requiresAp2Reauthorization(message)) return false;
+      invalidateAp2Session();
+      setAgentError(null);
+      return true;
+    },
+    [invalidateAp2Session]
+  );
+
   const loadThreads = useCallback(async (): Promise<ChatThread[]> => {
     if (!accountId) {
       setThreads([]);
@@ -96,12 +113,19 @@ export default function HomePage() {
       }
       try {
         const live = await fetchAp2SessionForThread(id, accountId);
-        setAp2Session(live?.status === "active" ? live : null);
-      } catch {
-        setAp2Session(null);
+        if (live?.status === "active") {
+          setAp2Session(live);
+        } else {
+          setAp2Session(null);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!handleAp2SessionFailure(msg)) {
+          setAp2Session(null);
+        }
       }
     },
-    [accountId, setAp2Session]
+    [accountId, setAp2Session, handleAp2SessionFailure]
   );
 
   const loadThread = useCallback(
@@ -396,6 +420,7 @@ export default function HomePage() {
       setAp2Session(activeSession);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (handleAp2SessionFailure(msg)) return;
       setAgentError(msg);
       return;
     }
@@ -427,6 +452,7 @@ export default function HomePage() {
 
       if (!res.ok) {
         const err = await res.text();
+        if (handleAp2SessionFailure(err)) return;
         throw new Error(err || `Chat failed (${res.status})`);
       }
       if (!res.body) throw new Error("No response body from agent");
@@ -434,6 +460,7 @@ export default function HomePage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let sseBuffer = "";
+      let ap2Invalidated = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -522,6 +549,10 @@ export default function HomePage() {
                 setAgentPickedArch(Boolean(event.auto));
               }
             } else if (event.type === "text" && event.content) {
+              if (handleAp2SessionFailure(event.content)) {
+                ap2Invalidated = true;
+                break;
+              }
               upsertAssistantBlock(
                 (block) => ({
                   ...block,
@@ -559,6 +590,10 @@ export default function HomePage() {
                 requestId
               );
             } else if (event.content) {
+              if (handleAp2SessionFailure(event.content)) {
+                ap2Invalidated = true;
+                break;
+              }
               upsertAssistantBlock(
                 (block) => ({
                   ...block,
@@ -571,7 +606,10 @@ export default function HomePage() {
             /* skip */
           }
         }
+        if (ap2Invalidated) break;
       }
+
+      if (ap2Invalidated) return;
 
       setChat((c) => {
         if (requestId !== chatRequestId.current) return c;
@@ -581,13 +619,15 @@ export default function HomePage() {
         return [...c, { role: "assistant", text: "No response from agent." }];
       });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (handleAp2SessionFailure(msg)) return;
       setChat((c) => {
         if (requestId !== chatRequestId.current) return c;
         return [
           ...c,
           {
             role: "assistant",
-            text: `Error: ${e instanceof Error ? e.message : e}`,
+            text: `Error: ${msg}`,
           },
         ];
       });
@@ -617,12 +657,6 @@ export default function HomePage() {
         ap2SetupStatus={ap2SetupStatus}
         ap2SetupError={ap2SetupError}
         onAuthorize={() => void runAp2Setup()}
-        onDismissAuthorize={() => {
-          if (!ap2SetupLoading) {
-            setAp2SetupError(null);
-            setAp2SetupStatus(null);
-          }
-        }}
         threadId={threadId}
         threads={threads}
         threadsLoading={threadsLoading}
