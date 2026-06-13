@@ -10,11 +10,9 @@
 
 | Resource | Link |
 |----------|------|
-| Live Demo | [View](https://pocu-demo.example.com) |
-| Demo Video | [View](https://youtu.be/pocu-demo-placeholder) |
-| Pitch Deck | [View](https://docs.google.com/presentation/d/pocu-deck-placeholder) |
-
-*Replace placeholder URLs before hackathon submission.*
+| Live Demo | [View](https://pocu.vercel.app) |
+| Demo Video | [View](https://youtu.be/UPh4eSmdOXw) |
+| Pitch Deck | [View](https://canva.link/ghs8rg90q78u349) |
 
 ---
 
