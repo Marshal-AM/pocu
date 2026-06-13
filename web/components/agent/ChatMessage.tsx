@@ -2,7 +2,6 @@ import { ChatMarkdown } from "@/app/components/ChatMarkdown";
 import { cn } from "@/lib/utils";
 import type { ChatBlock } from "@/components/agent/types";
 import { stripChatFileSizes } from "@/components/agent/chat-text";
-import { AgentAvatar, UserAvatar } from "@/components/agent/ChatChrome";
 import { RecommendedDatasetCard, DatasetGrid } from "@/components/agent/DatasetCard";
 import { JobQueuedCard } from "@/components/agent/JobQueuedCard";
 
@@ -41,49 +40,36 @@ export function ChatMessage({
   return (
     <div
       className={cn(
-        "flex w-full gap-3",
-        isUser ? "flex-row-reverse" : "flex-row"
+        "flex w-full flex-col gap-2",
+        isUser ? "items-end" : "items-start"
       )}
     >
-      {isUser ? <UserAvatar /> : <AgentAvatar />}
+      {showText && (
+        <div
+          className={cn(
+            "max-w-[90%] text-sm leading-relaxed sm:max-w-[80%]",
+            isUser
+              ? "rounded-2xl rounded-tr-md bg-primary/10 px-4 py-3 whitespace-pre-wrap text-foreground"
+              : "rounded-2xl rounded-tl-md border border-border/60 bg-surface px-4 py-3 text-foreground"
+          )}
+        >
+          {isUser ? block.text : <ChatMarkdown content={stripChatFileSizes(block.text!)} />}
+        </div>
+      )}
 
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col gap-3",
-          isUser ? "items-end" : "items-start"
-        )}
-      >
-        <span className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {isUser ? "You" : "Agent"}
-        </span>
-
-        {showText && (
-          <div
-            className={cn(
-              "max-w-[95%] text-sm leading-relaxed sm:max-w-[85%]",
-              isUser
-                ? "rounded-2xl rounded-tr-md bg-accent/15 px-4 py-3 whitespace-pre-wrap text-foreground ring-1 ring-accent/20"
-                : "rounded-2xl rounded-tl-md border border-border/80 bg-background/80 px-4 py-3 text-foreground/90 shadow-sm"
-            )}
-          >
-            {isUser ? block.text : <ChatMarkdown content={stripChatFileSizes(block.text!)} />}
-          </div>
-        )}
-
-        {block.role === "assistant" && block.dataset && (
-          <RecommendedDatasetCard
-            dataset={block.dataset}
-            onStartTraining={onStartTraining}
-            onShowAlternatives={onShowAlternatives}
-          />
-        )}
-        {block.role === "assistant" && block.datasets && block.datasets.length > 0 && (
-          <DatasetGrid datasets={block.datasets} onSelect={onDatasetSelect} />
-        )}
-        {block.role === "assistant" && block.job && (
-          <JobQueuedCard job={block.job} />
-        )}
-      </div>
+      {block.role === "assistant" && block.dataset && (
+        <RecommendedDatasetCard
+          dataset={block.dataset}
+          onStartTraining={onStartTraining}
+          onShowAlternatives={onShowAlternatives}
+        />
+      )}
+      {block.role === "assistant" && block.datasets && block.datasets.length > 0 && (
+        <DatasetGrid datasets={block.datasets} onSelect={onDatasetSelect} />
+      )}
+      {block.role === "assistant" && block.job && (
+        <JobQueuedCard job={block.job} />
+      )}
     </div>
   );
 }

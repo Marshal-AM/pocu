@@ -75,6 +75,11 @@ class CreateThreadRequest(BaseModel):
     user_account_id: str = ""
 
 
+class UpdateThreadRequest(BaseModel):
+    title: str
+    user_account_id: str
+
+
 def _apply_sse_to_assistant(assistant: dict[str, Any], event: dict[str, Any]) -> None:
     etype = event.get("type")
     if etype == "status":
@@ -229,6 +234,23 @@ async def activate_ap2_session(session_id: str, req: ActivateAp2SessionRequest) 
         raise HTTPException(500, str(e)) from e
 
 
+@app.get("/ap2/sessions/by-thread/{thread_id}")
+def get_ap2_session_for_thread(thread_id: str, user_account_id: str = "") -> dict[str, Any]:
+    from pocu_ap2.session import get_session, get_thread_session
+
+    uid = user_account_id.strip()
+    if not uid:
+        raise HTTPException(400, "user_account_id is required")
+    row = get_thread_session(thread_id.strip())
+    if not row or row.get("user_account_id") != uid:
+        raise HTTPException(404, "No active AP2 session for thread")
+    session = get_session(row["id"], uid)
+    if not session:
+        raise HTTPException(404, "No active AP2 session for thread")
+    safe = {k: v for k, v in session.items() if not k.endswith("_sdjwt")}
+    return safe
+
+
 @app.get("/ap2/sessions/{session_id}")
 def get_ap2_session(session_id: str, user_account_id: str = "") -> dict[str, Any]:
     from pocu_ap2.session import get_session
@@ -310,6 +332,29 @@ def create_thread_endpoint(req: CreateThreadRequest) -> dict[str, Any]:
             req.architecture_id,
             req.user_account_id.strip(),
         )
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+
+
+@app.patch("/threads/{thread_id}")
+def patch_thread(thread_id: str, req: UpdateThreadRequest) -> dict[str, Any]:
+    uid = req.user_account_id.strip()
+    if not uid:
+        raise HTTPException(400, "user_account_id is required")
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    try:
+        existing = get_thread(thread_id, uid)
+        if not existing:
+            raise HTTPException(404, "Thread not found")
+        update_thread(thread_id, title=title[:200])
+        updated = get_thread(thread_id, uid)
+        if not updated:
+            raise HTTPException(404, "Thread not found")
+        return updated
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e)) from e
 

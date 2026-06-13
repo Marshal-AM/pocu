@@ -11,17 +11,16 @@ export function PipelineStatus({ message, progressPct }: PipelineStatusProps) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="truncate">{shortMessage}</span>
         {progressPct != null && (
-          <span className="shrink-0 text-accent">{progressPct}%</span>
+          <span className="shrink-0 text-primary">{progressPct}%</span>
         )}
       </div>
       {progressPct != null && (
         <Progress
           value={progressPct}
-          className="h-1 bg-secondary [&_[data-slot=progress-indicator]]:bg-accent"
+          className="h-1 bg-surface [&_[data-slot=progress-indicator]]:bg-primary"
         />
       )}
     </div>

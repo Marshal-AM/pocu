@@ -1,6 +1,5 @@
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { USE_CASE_CHIPS } from "@/components/agent/types";
 
@@ -16,7 +15,7 @@ export function UseCaseChips({
   onSelect,
 }: UseCaseChipsProps) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-1.5">
       {USE_CASE_CHIPS.map((chip) => {
         const selected = useCase === chip;
         return (
@@ -25,17 +24,15 @@ export function UseCaseChips({
             type="button"
             onClick={() => onSelect(chip)}
             className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-all duration-200",
+              "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
               selected
-                ? "border-accent bg-accent/15 text-accent"
-                : "border-border bg-secondary/50 text-muted-foreground hover:border-accent/50 hover:text-foreground"
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-border/60 bg-surface text-muted-foreground hover:text-foreground"
             )}
           >
             {chip}
             {selected && agentPickedUseCase && (
-              <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
-                AI
-              </Badge>
+              <span className="ml-1 text-[10px] text-muted-foreground">· AI</span>
             )}
           </button>
         );

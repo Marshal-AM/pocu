@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import type { Ap2SessionState } from "@/lib/wallet/ap2-session";
-import { normalizeAp2Session } from "@/lib/wallet/ap2-session";
 import {
   connectWallet,
   disconnectWallet,
@@ -28,36 +27,6 @@ interface WalletContextValue {
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
-
-function sessionStorageKey(accountId: string, threadId: string): string {
-  return `pocu_ap2_session:${accountId}:${threadId}`;
-}
-
-export function loadStoredAp2Session(
-  accountId: string,
-  threadId: string
-): Ap2SessionState | null {
-  try {
-    const raw = sessionStorage.getItem(sessionStorageKey(accountId, threadId));
-    if (!raw) return null;
-    return normalizeAp2Session(JSON.parse(raw) as Record<string, unknown>);
-  } catch {
-    return null;
-  }
-}
-
-export function storeAp2Session(
-  accountId: string,
-  threadId: string,
-  session: Ap2SessionState | null
-): void {
-  const key = sessionStorageKey(accountId, threadId);
-  if (!session) {
-    sessionStorage.removeItem(key);
-    return;
-  }
-  sessionStorage.setItem(key, JSON.stringify(session));
-}
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);

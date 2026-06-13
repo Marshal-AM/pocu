@@ -1,8 +1,6 @@
 "use client";
 
 import { useWallet } from "./WalletProvider";
-import { Button } from "@/components/ui/button";
-import { Wallet } from "lucide-react";
 import { hashscanAccount, isHederaEntityId } from "@/lib/explorer";
 
 export function ConnectWalletButton() {
@@ -14,9 +12,8 @@ export function ConnectWalletButton() {
       : undefined;
 
     return (
-      <div className="flex items-center gap-2 text-xs">
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 font-mono text-foreground">
-          <Wallet className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="flex items-center gap-2 text-sm">
+        <div className="rounded-full border border-border/50 bg-surface px-4 py-2 font-mono text-xs text-foreground">
           {explorerHref ? (
             <a
               href={explorerHref}
@@ -33,7 +30,7 @@ export function ConnectWalletButton() {
         <button
           type="button"
           onClick={() => void disconnect()}
-          className="rounded-lg border border-border bg-card px-3 py-2 font-medium text-muted-foreground transition-colors hover:border-destructive hover:bg-destructive hover:text-white"
+          className="rounded-full border border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive"
         >
           Disconnect
         </button>
@@ -42,14 +39,13 @@ export function ConnectWalletButton() {
   }
 
   return (
-    <Button
+    <button
       type="button"
-      size="sm"
       disabled={connecting}
       onClick={() => void connect().catch(() => {})}
-      className="bg-accent text-accent-foreground hover:bg-accent/90"
+      className="rounded-full bg-accent px-5 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-50"
     >
-      {connecting ? "Connecting…" : "Connect HashPack"}
-    </Button>
+      {connecting ? "Connecting…" : "Connect Wallet"}
+    </button>
   );
 }

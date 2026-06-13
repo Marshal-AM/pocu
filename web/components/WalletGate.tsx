@@ -30,7 +30,7 @@ export function WalletGate({ children }: { children: ReactNode }) {
         <Card className="w-full max-w-md animate-in fade-in slide-in-from-bottom-4 border-border duration-500">
           <CardHeader className="text-center">
             <div className="mx-auto mb-3">
-              <PocuLogo size={72} className="mx-auto shadow-[0_0_24px_oklch(0.7_0.18_145/0.35)]" priority />
+              <PocuLogo size={72} className="mx-auto" priority />
             </div>
             <CardTitle className="text-2xl">POCU</CardTitle>
             <CardDescription className="text-base leading-relaxed">

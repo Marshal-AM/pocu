@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
-import { DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { WalletProvider } from "../components/WalletProvider";
 import { WalletGate } from "../components/WalletGate";
 import { AppShell } from "../components/layout/AppShell";
 
-const dmSans = DM_Sans({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-dm-sans",
+  variable: "--font-jakarta",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  variable: "--font-geist-mono",
 });
 
 export const metadata: Metadata = {
@@ -27,8 +27,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={`${dmSans.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+    <html lang="en" className="dark">
+      <body
+        className={`${jakarta.variable} ${geistMono.variable} font-sans antialiased`}
+      >
         <WalletProvider>
           <WalletGate>
             <AppShell>{children}</AppShell>

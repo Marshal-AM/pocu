@@ -7,17 +7,12 @@ import type {
   ChatBlock,
   ChatThread,
 } from "@/components/agent/types";
-import { Ap2SetupGate } from "@/components/Ap2SetupGate";
-import {
-  useWallet,
-  loadStoredAp2Session,
-  storeAp2Session,
-} from "../components/WalletProvider";
+import { useWallet } from "../components/WalletProvider";
 import {
   authorizeSessionAllowance,
   completeAp2SessionAfterAllowance,
   ensureAp2ReadyForTraining,
-  fetchAp2Session,
+  fetchAp2SessionForThread,
   validateWalletConfigAgainstAgent,
   type Ap2SessionState,
   type Ap2SetupStep,
@@ -37,6 +32,7 @@ export default function HomePage() {
   const [agentPickedArch, setAgentPickedArch] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<{
@@ -44,13 +40,12 @@ export default function HomePage() {
     progress_pct?: number;
     message?: string;
   } | null>(null);
-  const [showAp2Setup, setShowAp2Setup] = useState(false);
   const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
   const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
   const [ap2SetupError, setAp2SetupError] = useState<string | null>(null);
   const [ap2SettlementNote, setAp2SettlementNote] = useState<string | null>(null);
   const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
-  const autoNewChatForAccount = useRef<string | null>(null);
+  const loadedAccountRef = useRef<string | null>(null);
   const chatRequestId = useRef(0);
   const ap2SetupRequestId = useRef(0);
 
@@ -58,20 +53,39 @@ export default function HomePage() {
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
   const ap2SessionActive = ap2Session?.status === "active";
 
-  const loadThreads = useCallback(async () => {
+  const loadThreads = useCallback(async (): Promise<ChatThread[]> => {
     if (!accountId) {
       setThreads([]);
-      return;
+      return [];
     }
     try {
       const res = await fetch(
         `/api/threads?account_id=${encodeURIComponent(accountId)}`
       );
-      if (res.ok) setThreads(await res.json());
+      if (!res.ok) return [];
+      const data = (await res.json()) as ChatThread[];
+      setThreads(data);
+      return data;
     } catch {
-      /* ignore */
+      return [];
     }
   }, [accountId]);
+
+  const loadAp2SessionForThread = useCallback(
+    async (id: string) => {
+      if (!accountId) {
+        setAp2Session(null);
+        return;
+      }
+      try {
+        const live = await fetchAp2SessionForThread(id, accountId);
+        setAp2Session(live?.status === "active" ? live : null);
+      } catch {
+        setAp2Session(null);
+      }
+    },
+    [accountId, setAp2Session]
+  );
 
   const loadThread = useCallback(
     async (id: string) => {
@@ -81,6 +95,8 @@ export default function HomePage() {
       setLoading(false);
       setPipelineStatus(null);
       setJobProgress(null);
+      setAp2SetupError(null);
+      setAp2SetupStatus(null);
       try {
         const res = await fetch(
           `/api/threads/${id}?account_id=${encodeURIComponent(accountId)}`
@@ -88,7 +104,6 @@ export default function HomePage() {
         if (!res.ok) {
           if (res.status === 404 && threadStorageKey) {
             localStorage.removeItem(threadStorageKey);
-            setThreadId(null);
           }
           return;
         }
@@ -97,47 +112,50 @@ export default function HomePage() {
         if (threadStorageKey) localStorage.setItem(threadStorageKey, data.id);
         setChat(data.messages ?? []);
         if (data.title) setUseCase(data.title);
-
-        const stored = loadStoredAp2Session(accountId, data.id);
-        if (stored?.session_id) {
-          const live = await fetchAp2Session(stored.session_id, accountId);
-          if (live?.status === "active") {
-            setAp2Session(live);
-            setShowAp2Setup(false);
-          } else {
-            setAp2Session(null);
-            setShowAp2Setup(true);
-          }
-        } else {
-          setAp2Session(null);
-          setShowAp2Setup(true);
-        }
+        await loadAp2SessionForThread(data.id);
       } catch {
         /* ignore */
       }
     },
-    [accountId, threadStorageKey, setAp2Session]
+    [accountId, threadStorageKey, loadAp2SessionForThread]
   );
 
-  const startNewChat = useCallback(() => {
-    chatRequestId.current += 1;
-    ap2SetupRequestId.current += 1;
-    setLoading(false);
-    setPipelineStatus(null);
-    setJobProgress(null);
-    setThreadId(null);
-    if (threadStorageKey) localStorage.removeItem(threadStorageKey);
-    setChat([]);
-    setMessage("");
-    setUseCase("");
-    setArchitectureId("");
-    setAgentPickedUseCase(false);
-    setAgentPickedArch(false);
-    setAp2Session(null);
-    setAp2SetupError(null);
-    setAp2SetupStatus(null);
-    setShowAp2Setup(true);
-  }, [threadStorageKey, setAp2Session]);
+  const createChat = useCallback(async () => {
+    if (!accountId) return;
+    const res = await fetch("/api/threads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "New chat",
+        user_account_id: accountId,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const thread = (await res.json()) as ChatThread;
+    await loadThreads();
+    await loadThread(thread.id);
+  }, [accountId, loadThreads, loadThread]);
+
+  const renameThread = useCallback(
+    async (id: string, title: string) => {
+      if (!accountId) return;
+      const res = await fetch(`/api/threads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          user_account_id: accountId,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const updated = (await res.json()) as ChatThread;
+      setThreads((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, title: updated.title } : t))
+      );
+      if (threadId === id) setUseCase(updated.title || title);
+    },
+    [accountId, threadId]
+  );
 
   const loadArchs = useCallback(async () => {
     const q = tierFilter ? `?tier=${tierFilter}` : "";
@@ -168,7 +186,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!accountId || !walletReady) {
       if (!accountId) {
-        autoNewChatForAccount.current = null;
+        loadedAccountRef.current = null;
         setThreads([]);
         setThreadId(null);
         setChat([]);
@@ -176,12 +194,40 @@ export default function HomePage() {
       }
       return;
     }
-    void loadThreads();
-    if (autoNewChatForAccount.current !== accountId) {
-      autoNewChatForAccount.current = accountId;
-      startNewChat();
-    }
-  }, [accountId, walletReady, loadThreads, startNewChat, setAp2Session]);
+
+    if (loadedAccountRef.current === accountId) return;
+
+    void (async () => {
+      setThreadsLoading(true);
+      try {
+        const list = await loadThreads();
+        loadedAccountRef.current = accountId;
+
+        if (list.length === 0) {
+          setThreadId(null);
+          setChat([]);
+          setAp2Session(null);
+          return;
+        }
+
+        const saved = threadStorageKey
+          ? localStorage.getItem(threadStorageKey)
+          : null;
+        const target =
+          saved && list.some((t) => t.id === saved) ? saved : list[0].id;
+        await loadThread(target);
+      } finally {
+        setThreadsLoading(false);
+      }
+    })();
+  }, [
+    accountId,
+    walletReady,
+    loadThreads,
+    loadThread,
+    threadStorageKey,
+    setAp2Session,
+  ]);
 
   function upsertAssistantBlock(
     updater: (block: ChatBlock) => ChatBlock,
@@ -200,29 +246,13 @@ export default function HomePage() {
     });
   }
 
-  async function ensureThreadId(): Promise<string | null> {
-    if (threadId) return threadId;
-    if (!accountId) return null;
-    const res = await fetch("/api/threads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: useCase || "New chat",
-        use_case: useCase,
-        architecture_id: architectureId,
-        user_account_id: accountId,
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const thread = (await res.json()) as ChatThread;
-    setThreadId(thread.id);
-    if (threadStorageKey) localStorage.setItem(threadStorageKey, thread.id);
-    return thread.id;
-  }
-
   async function runAp2Setup(): Promise<Ap2SessionState | null> {
     if (!accountId) {
       setAp2SetupError("Connect HashPack before authorizing.");
+      return null;
+    }
+    if (!threadId) {
+      setAp2SetupError("Create a chat before authorizing.");
       return null;
     }
     const requestId = ++ap2SetupRequestId.current;
@@ -253,13 +283,9 @@ export default function HomePage() {
       const allowanceTxId = await authorizeSessionAllowance(accountId, onStep);
       if (isStale()) return null;
 
-      setStatus("Allowance confirmed. Creating chat thread…");
-      const tid = await ensureThreadId();
-      if (isStale()) return null;
-      if (!tid) throw new Error("Could not create chat thread");
-
+      setStatus("Allowance confirmed. Activating AP2 session…");
       const session = await completeAp2SessionAfterAllowance({
-        threadId: tid,
+        threadId,
         userAccountId: accountId,
         intent: useCase || "POCU chat and on-chain ML training",
         allowanceTxId,
@@ -279,8 +305,6 @@ export default function HomePage() {
       if (isStale()) return null;
 
       setAp2Session(ready);
-      storeAp2Session(accountId, tid, ready);
-      setShowAp2Setup(false);
       setAp2SetupStatus(null);
       setAp2SetupError(null);
       return session;
@@ -298,20 +322,14 @@ export default function HomePage() {
   }
 
   async function handleDatasetSelect(ref: string, title: string) {
-    if (!ap2SessionActive) {
-      setShowAp2Setup(true);
-      return;
-    }
+    if (!ap2SessionActive) return;
     const prompt = `Use dataset "${ref}" (${title}). Inspect it, download, prepare, and start the training job.`;
     if (!loading) void sendChat(prompt);
     else setMessage(prompt);
   }
 
   async function handleStartTraining(ref: string, title: string) {
-    if (!ap2SessionActive) {
-      setShowAp2Setup(true);
-      return;
-    }
+    if (!ap2SessionActive) return;
     if (!accountId) {
       setAgentError("Connect HashPack before training.");
       return;
@@ -344,10 +362,11 @@ export default function HomePage() {
       setAgentError("Connect your wallet before chatting.");
       return;
     }
-    if (ap2Session?.status !== "active") {
-      setShowAp2Setup(true);
+    if (!threadId) {
+      setAgentError("Create or select a chat first.");
       return;
     }
+    if (ap2Session?.status !== "active") return;
 
     let activeSession: Ap2SessionState;
     try {
@@ -356,11 +375,9 @@ export default function HomePage() {
         session: ap2Session,
       });
       setAp2Session(activeSession);
-      if (threadId) storeAp2Session(accountId, threadId, activeSession);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setAgentError(msg);
-      setShowAp2Setup(true);
       return;
     }
 
@@ -377,17 +394,6 @@ export default function HomePage() {
     setJobProgress(null);
 
     try {
-      const history = threadId
-        ? undefined
-        : chat.flatMap((b) => {
-            const parts: { role: string; content: string }[] = [];
-            if (b.role === "user" && b.text) parts.push({ role: "user", content: b.text });
-            if (b.role === "assistant" && b.text) {
-              parts.push({ role: "assistant", content: b.text });
-            }
-            return parts;
-          });
-
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -396,7 +402,6 @@ export default function HomePage() {
           use_case: useCase,
           architecture_id: architectureId,
           thread_id: threadId,
-          history,
           user_account_id: accountId,
           ap2_session_id: activeSession.session_id,
         }),
@@ -438,6 +443,7 @@ export default function HomePage() {
               architecture_id?: string;
               auto?: boolean;
               thread_id?: string;
+              title?: string;
             };
 
             if (event.type === "status" && event.message) {
@@ -459,13 +465,27 @@ export default function HomePage() {
               if (threadStorageKey) {
                 localStorage.setItem(threadStorageKey, event.thread_id);
               }
-              if (accountId && activeSession) {
-                storeAp2Session(accountId, event.thread_id, activeSession);
+              if (event.title) {
+                setThreads((prev) =>
+                  prev.map((t) =>
+                    t.id === event.thread_id
+                      ? { ...t, title: event.title ?? t.title }
+                      : t
+                  )
+                );
               }
             } else if (event.type === "selection") {
               if (event.use_case) {
                 setUseCase(event.use_case);
                 setAgentPickedUseCase(Boolean(event.auto));
+                if (threadId) {
+                  const autoTitle = event.use_case.slice(0, 200);
+                  setThreads((prev) =>
+                    prev.map((t) =>
+                      t.id === threadId ? { ...t, title: autoTitle } : t
+                    )
+                  );
+                }
               }
               if (event.architecture_id) {
                 setArchitectureId(event.architecture_id);
@@ -550,82 +570,76 @@ export default function HomePage() {
     }
   }
 
-  function handleThreadChange(id: string | null) {
-    if (id) void loadThread(id);
-    else startNewChat();
+  function handleThreadChange(id: string) {
+    void loadThread(id);
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <Ap2SetupGate
-        sessionActive={ap2SessionActive}
-        showSetup={showAp2Setup}
-        setupLoading={ap2SetupLoading}
-        setupStatus={ap2SetupStatus}
-        setupError={ap2SetupError}
+    <div className="flex h-full min-h-0 w-full flex-1">
+      <ChatPanel
+        agentError={agentError}
+        ap2SettlementNote={ap2SettlementNote}
+        ap2SessionActive={ap2SessionActive}
+        ap2SetupLoading={ap2SetupLoading}
+        ap2SetupStatus={ap2SetupStatus}
+        ap2SetupError={ap2SetupError}
         onAuthorize={() => void runAp2Setup()}
-        onOpenSetup={() => {
-          setAp2SetupError(null);
-          setShowAp2Setup(true);
+        onDismissAuthorize={() => {
+          if (!ap2SetupLoading) {
+            setAp2SetupError(null);
+            setAp2SetupStatus(null);
+          }
         }}
-        onDismissSetup={
-          ap2SetupLoading
-            ? undefined
-            : () => {
-                setShowAp2Setup(false);
-                setAp2SetupError(null);
-              }
-        }
-      >
-        <ChatPanel
-          agentError={agentError}
-          ap2SettlementNote={ap2SettlementNote}
-          threadId={threadId}
-          threads={threads}
-          useCase={useCase}
-          agentPickedUseCase={agentPickedUseCase}
-          agentPickedArch={agentPickedArch}
-          tierFilter={tierFilter}
-          architectureId={architectureId}
-          architectures={architectures}
-          selectedArch={selectedArch}
-          chat={chat}
-          message={message}
-          loading={loading}
-          pipelineStatus={pipelineStatus}
-          jobProgressPct={jobProgress?.progress_pct}
-          chatDisabled={!ap2SessionActive}
-          onThreadChange={handleThreadChange}
-          onNewChat={startNewChat}
-          onOpenAp2Setup={() => setShowAp2Setup(true)}
-          onMessageChange={setMessage}
-          onSend={() => void sendChat()}
-          onUseCaseChange={(value) => {
-            setUseCase(value);
-            setAgentPickedUseCase(false);
-          }}
-          onClearUseCase={() => {
-            setUseCase("");
-            setAgentPickedUseCase(false);
-          }}
-          onPresetSelect={(chip) => {
-            setUseCase(chip);
-            setAgentPickedUseCase(false);
-          }}
-          onTierFilterChange={setTierFilter}
-          onArchitectureSelect={(id) => {
-            setArchitectureId(id);
-            setAgentPickedArch(false);
-          }}
-          onClearArchitecture={() => {
-            setArchitectureId("");
-            setAgentPickedArch(false);
-          }}
-          onStartTraining={handleStartTraining}
-          onShowAlternatives={handleShowAlternatives}
-          onDatasetSelect={handleDatasetSelect}
-        />
-      </Ap2SetupGate>
+        threadId={threadId}
+        threads={threads}
+        threadsLoading={threadsLoading}
+        onCreateFirstChat={() => void createChat().catch((e) => {
+          setAgentError(e instanceof Error ? e.message : String(e));
+        })}
+        useCase={useCase}
+        agentPickedUseCase={agentPickedUseCase}
+        agentPickedArch={agentPickedArch}
+        tierFilter={tierFilter}
+        architectureId={architectureId}
+        architectures={architectures}
+        selectedArch={selectedArch}
+        chat={chat}
+        message={message}
+        loading={loading}
+        pipelineStatus={pipelineStatus}
+        jobProgressPct={jobProgress?.progress_pct}
+        onThreadChange={handleThreadChange}
+        onNewChat={() => void createChat().catch((e) => {
+          setAgentError(e instanceof Error ? e.message : String(e));
+        })}
+        onRenameThread={renameThread}
+        onMessageChange={setMessage}
+        onSend={() => void sendChat()}
+        onUseCaseChange={(value) => {
+          setUseCase(value);
+          setAgentPickedUseCase(false);
+        }}
+        onClearUseCase={() => {
+          setUseCase("");
+          setAgentPickedUseCase(false);
+        }}
+        onPresetSelect={(chip) => {
+          setUseCase(chip);
+          setAgentPickedUseCase(false);
+        }}
+        onTierFilterChange={setTierFilter}
+        onArchitectureSelect={(id) => {
+          setArchitectureId(id);
+          setAgentPickedArch(false);
+        }}
+        onClearArchitecture={() => {
+          setArchitectureId("");
+          setAgentPickedArch(false);
+        }}
+        onStartTraining={handleStartTraining}
+        onShowAlternatives={handleShowAlternatives}
+        onDatasetSelect={handleDatasetSelect}
+      />
     </div>
   );
 }

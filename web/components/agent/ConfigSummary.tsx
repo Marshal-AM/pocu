@@ -17,14 +17,14 @@ export function ConfigSummary({
   if (!useCase && !architectureId) return null;
 
   return (
-    <div className={cn("flex flex-wrap gap-2", className)}>
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
       {useCase && (
-        <span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
+        <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs text-muted-foreground">
           {useCase}
         </span>
       )}
       {selectedArch && (
-        <span className="rounded-full bg-accent/10 px-3 py-1 text-xs text-accent">
+        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs text-primary">
           {selectedArch.name}
         </span>
       )}

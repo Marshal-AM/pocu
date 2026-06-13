@@ -62,3 +62,4 @@ Thumbs.db
 # --- Local reference / vendored docs (not part of repo) ---
 docs/
 reference/
+ref/

@@ -294,6 +294,18 @@ export async function fetchAp2Session(
   return normalizeAp2Session((await res.json()) as Record<string, unknown>);
 }
 
+export async function fetchAp2SessionForThread(
+  threadId: string,
+  userAccountId: string
+): Promise<Ap2SessionState | null> {
+  const res = await fetch(
+    `/api/ap2/sessions/by-thread/${threadId}?user_account_id=${encodeURIComponent(userAccountId)}`
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await res.text());
+  return normalizeAp2Session((await res.json()) as Record<string, unknown>);
+}
+
 export async function fetchAp2Config(): Promise<AgentAp2Config> {
   const res = await fetchWithTimeout("/api/ap2/config", {}, "AP2 config fetch");
   if (!res.ok) throw new Error(await res.text());
