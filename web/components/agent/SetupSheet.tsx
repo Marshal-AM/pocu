@@ -2,7 +2,7 @@
 
 import { SlidersHorizontal } from "lucide-react";
 import type { Architecture } from "@/components/agent/types";
-import { USE_CASE_CHIPS } from "@/components/agent/types";
+import { UseCaseChips } from "@/components/agent/UseCasePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,26 +98,11 @@ export function SetupSheet({
             {agentPickedUseCase && useCase && (
               <p className="text-xs text-accent">Set by agent</p>
             )}
-            <Select
-              value={
-                USE_CASE_CHIPS.includes(
-                  useCase as (typeof USE_CASE_CHIPS)[number]
-                )
-                  ? useCase
-                  : "none"
-              }
-              onValueChange={(v) => v !== "none" && onPresetSelect(v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a template" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Pick a template…</SelectItem>
-                {USE_CASE_CHIPS.map((chip) => (
-                  <SelectItem key={chip} value={chip}>{chip}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <UseCaseChips
+              useCase={useCase}
+              agentPickedUseCase={agentPickedUseCase}
+              onSelect={onPresetSelect}
+            />
           </div>
 
           <div className="space-y-3">
