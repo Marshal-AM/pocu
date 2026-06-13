@@ -1,6 +1,7 @@
 "use client";
 
 import { AccountId, Hbar, type Transaction, type TransactionResponse } from "@hiero-ledger/sdk";
+import { ensureWalletReadyForSigning } from "./hashpack-connect";
 import { getDAppConnector } from "./hedera-wallet";
 
 const WALLET_TIMEOUT_MS = 600_000; // 10 minutes (HashPack / ACP wallet steps)
@@ -35,6 +36,7 @@ export async function walletSignAndExecute(
   label: string
 ): Promise<string> {
   const dApp = await getDAppConnector();
+  await ensureWalletReadyForSigning(dApp);
   const signer = dApp.getSigner(AccountId.fromString(accountId));
   const tx = transaction.setMaxTransactionFee(new Hbar(5));
 

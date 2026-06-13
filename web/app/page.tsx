@@ -14,11 +14,13 @@ import {
   storeAp2Session,
 } from "../components/WalletProvider";
 import {
+  approveAp2Allowance,
   fetchAp2Session,
   setupAp2Session,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
+import { ensureWalletReadyForSigning } from "@/lib/wallet/hashpack-connect";
 
 export default function HomePage() {
   const [architectures, setArchitectures] = useState<Architecture[]>([]);
@@ -204,17 +206,21 @@ export default function HomePage() {
       return null;
     }
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Preparing wallet…");
+    setAp2SetupStatus("Opening HashPack…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
       const { getDAppConnector, getConnectedAccountId } = await import(
         "@/lib/wallet/hedera-wallet"
       );
-      await getDAppConnector();
+      const dApp = await getDAppConnector();
+      await ensureWalletReadyForSigning(dApp);
       if (!getConnectedAccountId()) {
         throw new Error("Wallet session expired — disconnect and connect HashPack again.");
       }
+
+      const onStep = (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg);
+      const allowanceTxId = await approveAp2Allowance(accountId, onStep);
 
       setAp2SetupStatus("Creating chat thread…");
       const tid = await ensureThreadId();
@@ -225,7 +231,8 @@ export default function HomePage() {
         userAccountId: accountId,
         intent: useCase || "POCU chat and on-chain ML training",
         includeNftAssociate,
-        onStep: (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg),
+        allowanceTxId,
+        onStep,
       });
       if (session.status !== "active") {
         throw new Error(`AP2 session not active (status=${session.status})`);

@@ -10,7 +10,7 @@ import {
 } from "@hiero-ledger/sdk";
 import { ALLOWANCE_HBAR, requireWalletConfig } from "./config";
 import { getDAppConnector, getHip30AccountId } from "./hedera-wallet";
-import { fetchHbarAllowance, isTokenAssociated } from "./mirror";
+import { isTokenAssociated } from "./mirror";
 import { pauseBetweenWalletSteps, walletSignAndExecute } from "./wallet-tx";
 
 export interface Ap2SessionState {
@@ -59,15 +59,7 @@ export async function approveAp2Allowance(
   onStep?: (step: Ap2SetupStep, message: string) => void
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
-  const report = (step: Ap2SetupStep) => onStep?.(step, STEP_MESSAGES[step]);
-
-  const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
-  if (existing >= ALLOWANCE_HBAR) {
-    onStep?.("allowance", `Allowance already set (${existing} HBAR). Skipping.`);
-    return "existing_allowance";
-  }
-
-  report("allowance");
+  onStep?.("allowance", STEP_MESSAGES.allowance);
   return walletSignAndExecute(
     userAccountId,
     new AccountAllowanceApproveTransaction()
@@ -159,10 +151,12 @@ export async function setupAp2Session(params: {
   userAccountId: string;
   intent?: string;
   includeNftAssociate?: boolean;
+  allowanceTxId?: string;
   onStep?: (step: Ap2SetupStep, message: string) => void;
 }): Promise<Ap2SessionState> {
-  // Wallet first so HashPack opens immediately when allowance is needed.
-  const allowanceTxId = await approveAp2Allowance(params.userAccountId, params.onStep);
+  const allowanceTxId =
+    params.allowanceTxId ??
+    (await approveAp2Allowance(params.userAccountId, params.onStep));
   await pauseBetweenWalletSteps();
 
   if (params.includeNftAssociate) {
