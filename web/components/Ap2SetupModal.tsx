@@ -10,6 +10,7 @@ interface Ap2SetupModalProps {
   open: boolean;
   loading: boolean;
   statusMessage: string | null;
+  errorMessage?: string | null;
   onAuthorize: () => void;
   onCancel?: () => void;
 }
@@ -18,6 +19,7 @@ export function Ap2SetupModal({
   open,
   loading,
   statusMessage,
+  errorMessage,
   onAuthorize,
   onCancel,
 }: Ap2SetupModalProps) {
@@ -38,6 +40,9 @@ export function Ap2SetupModal({
         </ul>
         {statusMessage ? (
           <p className="mt-4 text-sm text-muted-foreground">{statusMessage}</p>
+        ) : null}
+        {errorMessage ? (
+          <p className="mt-3 text-sm text-destructive">{errorMessage}</p>
         ) : null}
         <div className="mt-6 flex justify-end gap-2">
           {onCancel ? (

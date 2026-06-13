@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/components/agent/ChatPanel";
 import type {
   Architecture,
@@ -16,6 +16,7 @@ import {
 import {
   fetchAp2Session,
   setupAp2Session,
+  type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
 
@@ -41,7 +42,9 @@ export default function HomePage() {
   const [showAp2Setup, setShowAp2Setup] = useState(false);
   const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
   const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
-  const { accountId, ap2Session, setAp2Session } = useWallet();
+  const [ap2SetupError, setAp2SetupError] = useState<string | null>(null);
+  const { accountId, ap2Session, setAp2Session, ready: walletReady } = useWallet();
+  const autoNewChatForAccount = useRef<string | null>(null);
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
@@ -108,9 +111,13 @@ export default function HomePage() {
     if (threadStorageKey) localStorage.removeItem(threadStorageKey);
     setChat([]);
     setMessage("");
+    setUseCase("");
+    setArchitectureId("");
     setAgentPickedUseCase(false);
     setAgentPickedArch(false);
     setAp2Session(null);
+    setAp2SetupError(null);
+    setAp2SetupStatus(null);
     setShowAp2Setup(true);
   }, [threadStorageKey, setAp2Session]);
 
@@ -141,25 +148,22 @@ export default function HomePage() {
   }, [loadArchs]);
 
   useEffect(() => {
-    if (!accountId) {
-      setThreads([]);
-      setThreadId(null);
-      setChat([]);
-      setAp2Session(null);
+    if (!accountId || !walletReady) {
+      if (!accountId) {
+        autoNewChatForAccount.current = null;
+        setThreads([]);
+        setThreadId(null);
+        setChat([]);
+        setAp2Session(null);
+      }
       return;
     }
     void loadThreads();
-    const saved = threadStorageKey
-      ? localStorage.getItem(threadStorageKey)
-      : null;
-    if (saved) void loadThread(saved);
-    else {
-      setThreadId(null);
-      setChat([]);
-      setAp2Session(null);
-      setShowAp2Setup(true);
+    if (autoNewChatForAccount.current !== accountId) {
+      autoNewChatForAccount.current = accountId;
+      startNewChat();
     }
-  }, [accountId, loadThreads, loadThread, threadStorageKey, setAp2Session]);
+  }, [accountId, walletReady, loadThreads, startNewChat, setAp2Session]);
 
   function upsertAssistantBlock(updater: (block: ChatBlock) => ChatBlock) {
     setChat((c) => {
@@ -194,17 +198,28 @@ export default function HomePage() {
     return thread.id;
   }
 
-  async function runAp2Setup(includeNftAssociate = false) {
+  async function runAp2Setup(includeNftAssociate = false): Promise<Ap2SessionState | null> {
     if (!accountId) {
-      setAgentError("Connect HashPack before authorizing.");
-      return;
+      setAp2SetupError("Connect HashPack before authorizing.");
+      return null;
     }
     setAp2SetupLoading(true);
-    setAp2SetupStatus(null);
+    setAp2SetupStatus("Preparing wallet…");
+    setAp2SetupError(null);
     setAgentError(null);
     try {
+      const { getDAppConnector, getConnectedAccountId } = await import(
+        "@/lib/wallet/hedera-wallet"
+      );
+      await getDAppConnector();
+      if (!getConnectedAccountId()) {
+        throw new Error("Wallet session expired — disconnect and connect HashPack again.");
+      }
+
+      setAp2SetupStatus("Creating chat thread…");
       const tid = await ensureThreadId();
       if (!tid) throw new Error("Could not create chat thread");
+
       const session = await setupAp2Session({
         threadId: tid,
         userAccountId: accountId,
@@ -212,12 +227,20 @@ export default function HomePage() {
         includeNftAssociate,
         onStep: (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg),
       });
+      if (session.status !== "active") {
+        throw new Error(`AP2 session not active (status=${session.status})`);
+      }
       setAp2Session(session);
       storeAp2Session(accountId, tid, session);
       setShowAp2Setup(false);
       setAp2SetupStatus(null);
+      setAp2SetupError(null);
+      return session;
     } catch (e) {
-      setAgentError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setAp2SetupError(msg);
+      setAgentError(msg);
+      return null;
     } finally {
       setAp2SetupLoading(false);
     }
@@ -238,8 +261,8 @@ export default function HomePage() {
       setShowAp2Setup(true);
       return;
     }
-    await runAp2Setup(true);
-    if (!ap2Session?.session_id) return;
+    const session = await runAp2Setup(true);
+    if (!session) return;
     const prompt = `Yes, start training with dataset "${ref}" (${title}). Inspect it, download, prepare, and queue the job.`;
     if (!loading) void sendChat(prompt, true);
     else setMessage(prompt);
@@ -258,11 +281,17 @@ export default function HomePage() {
       setAgentError("Connect your wallet before chatting.");
       return;
     }
-    if (!ap2SessionActive) {
+    let activeSession = ap2Session;
+    if (activeSession?.status !== "active") {
       setShowAp2Setup(true);
-      if (includeNftForTraining) await runAp2Setup(true);
-      else return;
+      if (includeNftForTraining) {
+        activeSession = await runAp2Setup(true);
+        if (!activeSession) return;
+      } else {
+        return;
+      }
     }
+
     if (!overrideMessage) setMessage("");
     setChat((c) => [...c, { role: "user", text: userMsg }]);
     setLoading(true);
@@ -292,7 +321,7 @@ export default function HomePage() {
           thread_id: threadId,
           history,
           user_account_id: accountId,
-          ap2_session_id: ap2Session?.session_id,
+          ap2_session_id: activeSession.session_id,
         }),
       });
 
@@ -424,9 +453,20 @@ export default function HomePage() {
         showSetup={showAp2Setup}
         setupLoading={ap2SetupLoading}
         setupStatus={ap2SetupStatus}
+        setupError={ap2SetupError}
         onAuthorize={() => void runAp2Setup(false)}
-        onOpenSetup={() => setShowAp2Setup(true)}
-        onDismissSetup={() => setShowAp2Setup(false)}
+        onOpenSetup={() => {
+          setAp2SetupError(null);
+          setShowAp2Setup(true);
+        }}
+        onDismissSetup={
+          ap2SetupLoading
+            ? undefined
+            : () => {
+                setShowAp2Setup(false);
+                setAp2SetupError(null);
+              }
+        }
       >
         <ChatPanel
           agentError={agentError}

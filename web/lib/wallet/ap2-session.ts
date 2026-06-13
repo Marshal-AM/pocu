@@ -24,8 +24,32 @@ export interface Ap2SessionState {
 
 export type Ap2SetupStep = "allowance" | "associate" | "activate";
 
+const AGENT_FETCH_TIMEOUT_MS = 90_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  label: string
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AGENT_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(input, { ...init, signal: controller.signal });
+    return res;
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(
+        `${label} timed out after ${AGENT_FETCH_TIMEOUT_MS / 1000}s. Is the agent running on port 8000?`
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const STEP_MESSAGES: Record<Ap2SetupStep, string> = {
-  allowance: `Approve ${ALLOWANCE_HBAR} HBAR allowance for this chat session.`,
+  allowance: `Open HashPack and approve ${ALLOWANCE_HBAR} HBAR allowance for this session.`,
   associate: "Associate the model NFT token (required before training).",
   activate: "Activating AP2 session with agent…",
 };
@@ -90,15 +114,19 @@ export async function createAp2Session(params: {
   userAccountId: string;
   intent?: string;
 }): Promise<Ap2SessionState> {
-  const res = await fetch("/api/ap2/sessions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      thread_id: params.threadId,
-      user_account_id: params.userAccountId,
-      intent: params.intent ?? "POCU chat and on-chain ML training",
-    }),
-  });
+  const res = await fetchWithTimeout(
+    "/api/ap2/sessions",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: params.threadId,
+        user_account_id: params.userAccountId,
+        intent: params.intent ?? "POCU chat and on-chain ML training",
+      }),
+    },
+    "AP2 session creation"
+  );
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Ap2SessionState;
 }
@@ -110,14 +138,18 @@ export async function activateAp2Session(params: {
   onStep?: (step: Ap2SetupStep, message: string) => void;
 }): Promise<Ap2SessionState> {
   params.onStep?.("activate", STEP_MESSAGES.activate);
-  const res = await fetch(`/api/ap2/sessions/${params.sessionId}/activate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_account_id: params.userAccountId,
-      allowance_tx_id: params.allowanceTxId,
-    }),
-  });
+  const res = await fetchWithTimeout(
+    `/api/ap2/sessions/${params.sessionId}/activate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_account_id: params.userAccountId,
+        allowance_tx_id: params.allowanceTxId,
+      }),
+    },
+    "AP2 session activation"
+  );
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Ap2SessionState;
 }
@@ -129,22 +161,27 @@ export async function setupAp2Session(params: {
   includeNftAssociate?: boolean;
   onStep?: (step: Ap2SetupStep, message: string) => void;
 }): Promise<Ap2SessionState> {
+  // Wallet first so HashPack opens immediately when allowance is needed.
+  const allowanceTxId = await approveAp2Allowance(params.userAccountId, params.onStep);
+  await pauseBetweenWalletSteps();
+
+  if (params.includeNftAssociate) {
+    await associateModelNftIfNeeded(params.userAccountId, params.onStep);
+    await pauseBetweenWalletSteps();
+  }
+
+  params.onStep?.("activate", "Creating AP2 session…");
   const pending = await createAp2Session({
     threadId: params.threadId,
     userAccountId: params.userAccountId,
     intent: params.intent,
   });
-  const allowanceTxId = await approveAp2Allowance(params.userAccountId, params.onStep);
-  await pauseBetweenWalletSteps();
-  if (params.includeNftAssociate) {
-    await associateModelNftIfNeeded(params.userAccountId, params.onStep);
-    await pauseBetweenWalletSteps();
-  }
+
   return activateAp2Session({
     sessionId: pending.session_id,
     userAccountId: params.userAccountId,
     allowanceTxId,
-    onStep: params.onStep,
+    onStep: (step, msg) => params.onStep?.(step, msg),
   });
 }
 

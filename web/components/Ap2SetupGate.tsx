@@ -10,6 +10,7 @@ interface Ap2SetupGateProps {
   showSetup: boolean;
   setupLoading: boolean;
   setupStatus: string | null;
+  setupError?: string | null;
   onAuthorize: () => void;
   onOpenSetup: () => void;
   onDismissSetup?: () => void;
@@ -21,6 +22,7 @@ export function Ap2SetupGate({
   showSetup,
   setupLoading,
   setupStatus,
+  setupError,
   onAuthorize,
   onOpenSetup,
   onDismissSetup,
@@ -33,6 +35,7 @@ export function Ap2SetupGate({
         open={showSetup}
         loading={setupLoading}
         statusMessage={setupStatus}
+        errorMessage={setupError}
         onAuthorize={onAuthorize}
         onCancel={onDismissSetup}
       />
