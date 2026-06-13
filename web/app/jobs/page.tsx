@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Download } from "lucide-react";
+import { useWallet } from "@/components/WalletProvider";
 import { StatusBadge } from "@/components/jobs/StatusBadge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -27,30 +28,35 @@ interface Job {
 }
 
 export default function JobsPage() {
+  const { accountId } = useWallet();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
 
   async function load() {
+    if (!accountId) return;
     try {
-      const res = await fetch("/api/jobs");
+      const res = await fetch(
+        `/api/jobs?account_id=${encodeURIComponent(accountId)}`
+      );
       if (!res.ok) throw new Error(await res.text());
       setJobs(await res.json());
+      setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 10000);
+    void load();
+    const t = setInterval(() => void load(), 10000);
     return () => clearInterval(t);
-  }, []);
+  }, [accountId]);
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 space-y-6 duration-500">
       <div>
         <p className="text-sm text-muted-foreground">
-          All on-chain training jobs. Refreshes every 10 seconds.
+          Your on-chain training jobs. Refreshes every 10 seconds.
         </p>
       </div>
 
@@ -109,9 +115,9 @@ export default function JobsPage() {
                     </TableCell>
                     <TableCell>{j.train_samples ?? 2}</TableCell>
                     <TableCell>
-                      {j.supabase_model_url ? (
+                      {j.supabase_model_url && accountId ? (
                         <a
-                          href={`/api/jobs/${j.id}/manifest`}
+                          href={`/api/jobs/${j.id}/manifest?account_id=${encodeURIComponent(accountId)}`}
                           download="cpu_model_manifest.json"
                           className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
                         >

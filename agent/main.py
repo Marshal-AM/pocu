@@ -134,9 +134,11 @@ def architectures(tier: Optional[str] = None) -> list[dict[str, Any]]:
 
 
 @app.get("/jobs")
-def jobs(limit: int = 50) -> list[dict[str, Any]]:
+def jobs(user_account_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    if not user_account_id.strip():
+        raise HTTPException(400, "user_account_id is required")
     try:
-        return list_jobs(limit)
+        return list_jobs(limit, user_account_id.strip())
     except Exception as e:
         raise HTTPException(500, str(e)) from e
 
@@ -157,8 +159,10 @@ def estimate_cost(architecture_id: str, samples: int = 2, epochs: int = 1) -> di
 
 
 @app.get("/jobs/{job_id}")
-def job_detail(job_id: str) -> dict[str, Any]:
-    job = get_job(job_id)
+def job_detail(job_id: str, user_account_id: str = "") -> dict[str, Any]:
+    if not user_account_id.strip():
+        raise HTTPException(400, "user_account_id is required")
+    job = get_job(job_id, user_account_id.strip())
     if not job:
         raise HTTPException(404, "Job not found")
     return job

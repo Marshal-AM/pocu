@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useWallet } from "@/components/WalletProvider";
 
 function OnChainField({
   label,
@@ -46,16 +47,21 @@ function JobDetailSkeleton() {
 
 export default function JobDetailPage() {
   const params = useParams();
+  const { accountId } = useWallet();
   const id = params.id as string;
   const [job, setJob] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!accountId) return;
     async function load() {
       try {
-        const res = await fetch(`/api/jobs/${id}`);
+        const res = await fetch(
+          `/api/jobs/${id}?account_id=${encodeURIComponent(accountId)}`
+        );
         if (!res.ok) throw new Error(await res.text());
         setJob(await res.json());
+        setError("");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -63,7 +69,7 @@ export default function JobDetailPage() {
     load();
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
-  }, [id]);
+  }, [id, accountId]);
 
   if (error) {
     return (
@@ -116,7 +122,10 @@ export default function JobDetailPage() {
             size="sm"
             className="bg-accent text-accent-foreground hover:bg-accent/90"
           >
-            <a href={`/api/jobs/${id}/manifest`} download="cpu_model_manifest.json">
+            <a
+              href={`/api/jobs/${id}/manifest?account_id=${encodeURIComponent(accountId ?? "")}`}
+              download="cpu_model_manifest.json"
+            >
               <Download className="h-4 w-4" />
               Download manifest
             </a>
@@ -266,7 +275,7 @@ export default function JobDetailPage() {
               value={
                 hasManifest ? (
                   <a
-                    href={`/api/jobs/${id}/manifest`}
+                    href={`/api/jobs/${id}/manifest?account_id=${encodeURIComponent(accountId ?? "")}`}
                     download="cpu_model_manifest.json"
                     className="text-accent hover:underline"
                   >

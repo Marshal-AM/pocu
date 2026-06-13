@@ -30,21 +30,24 @@ def create_job(row: dict[str, Any]) -> dict[str, Any]:
     return result.data[0]
 
 
-def get_job(job_id: str) -> Optional[dict[str, Any]]:
+def get_job(job_id: str, user_account_id: str = "") -> Optional[dict[str, Any]]:
     sb = get_supabase()
-    result = sb.table("training_jobs").select("*").eq("id", job_id).single().execute()
+    query = sb.table("training_jobs").select("*").eq("id", job_id)
+    if user_account_id:
+        query = query.eq("user_account_id", user_account_id)
+    try:
+        result = query.single().execute()
+    except Exception:
+        return None
     return result.data
 
 
-def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+def list_jobs(limit: int = 50, user_account_id: str = "") -> list[dict[str, Any]]:
     sb = get_supabase()
-    result = (
-        sb.table("training_jobs")
-        .select("*")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    query = sb.table("training_jobs").select("*")
+    if user_account_id:
+        query = query.eq("user_account_id", user_account_id)
+    result = query.order("created_at", desc=True).limit(limit).execute()
     return result.data or []
 
 
