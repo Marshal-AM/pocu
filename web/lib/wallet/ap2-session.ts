@@ -9,8 +9,7 @@ import {
   TokenId,
 } from "@hiero-ledger/sdk";
 import { ALLOWANCE_HBAR, requireWalletConfig } from "./config";
-import { getDAppConnector, getHip30AccountId } from "./hedera-wallet";
-import { isTokenAssociated } from "./mirror";
+import { fetchHbarAllowance, isTokenAssociated } from "./mirror";
 import { pauseBetweenWalletSteps, walletSignAndExecute } from "./wallet-tx";
 
 export interface Ap2SessionState {
@@ -59,6 +58,16 @@ export async function approveAp2Allowance(
   onStep?: (step: Ap2SetupStep, message: string) => void
 ): Promise<string> {
   const { agentAccountId } = requireWalletConfig();
+
+  const existing = await fetchHbarAllowance(userAccountId, agentAccountId);
+  if (existing >= ALLOWANCE_HBAR) {
+    onStep?.(
+      "allowance",
+      `HBAR allowance already approved (${existing} HBAR) — no wallet step needed.`
+    );
+    return "existing_allowance";
+  }
+
   onStep?.("allowance", STEP_MESSAGES.allowance);
   return walletSignAndExecute(
     userAccountId,

@@ -34,17 +34,8 @@ export async function connectHashpackOrModal(dApp: DAppConnector): Promise<void>
   await dApp.openModal(undefined, true);
 }
 
-/** Re-bind the HashPack extension before signing so the popup opens for each transaction. */
+/** Ensure a wallet session exists before signing. Does not re-connect if already connected. */
 export async function ensureWalletReadyForSigning(dApp: DAppConnector): Promise<void> {
-  await waitForHashpackExtension(dApp);
-  const hashpack = findHashpackExtension(dApp);
-  if (hashpack?.available) {
-    console.log("[wallet] ensuring HashPack extension for signing");
-    await dApp.connectExtension(hashpack.id);
-    return;
-  }
-  if (dApp.signers.length === 0) {
-    console.log("[wallet] no signers — opening WalletConnect modal");
-    await dApp.openModal(undefined, true);
-  }
+  if (dApp.signers.length > 0) return;
+  await connectHashpackOrModal(dApp);
 }

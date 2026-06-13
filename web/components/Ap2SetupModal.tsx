@@ -30,8 +30,8 @@ export function Ap2SetupModal({
       <div className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg">
         <h2 className="text-lg font-semibold">Authorize AP2 session</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          HashPack will open first so you can approve the {SESSION_BUDGET_HBAR} HBAR
-          allowance for this session. After that, the agent activates your AP2 mandate.
+          If you have not approved the {SESSION_BUDGET_HBAR} HBAR allowance yet, HashPack
+          will open once for that transaction. Then the agent activates your AP2 session.
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           <li>Session budget: up to {SESSION_BUDGET_HBAR} HBAR</li>

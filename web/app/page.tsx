@@ -15,12 +15,12 @@ import {
 } from "../components/WalletProvider";
 import {
   approveAp2Allowance,
+  associateModelNftIfNeeded,
   fetchAp2Session,
   setupAp2Session,
   type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
-import { ensureWalletReadyForSigning } from "@/lib/wallet/hashpack-connect";
 
 export default function HomePage() {
   const [architectures, setArchitectures] = useState<Architecture[]>([]);
@@ -206,17 +206,13 @@ export default function HomePage() {
       return null;
     }
     setAp2SetupLoading(true);
-    setAp2SetupStatus("Opening HashPack…");
+    setAp2SetupStatus("Checking allowance…");
     setAp2SetupError(null);
     setAgentError(null);
     try {
-      const { getDAppConnector, getConnectedAccountId } = await import(
-        "@/lib/wallet/hedera-wallet"
-      );
-      const dApp = await getDAppConnector();
-      await ensureWalletReadyForSigning(dApp);
+      const { getConnectedAccountId } = await import("@/lib/wallet/hedera-wallet");
       if (!getConnectedAccountId()) {
-        throw new Error("Wallet session expired — disconnect and connect HashPack again.");
+        throw new Error("Connect HashPack first, then authorize the AP2 session.");
       }
 
       const onStep = (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg);
@@ -259,7 +255,7 @@ export default function HomePage() {
       return;
     }
     const prompt = `Use dataset "${ref}" (${title}). Inspect it, download, prepare, and start the training job.`;
-    if (!loading) void sendChat(prompt, true);
+    if (!loading) void sendChat(prompt);
     else setMessage(prompt);
   }
 
@@ -268,10 +264,23 @@ export default function HomePage() {
       setShowAp2Setup(true);
       return;
     }
-    const session = await runAp2Setup(true);
-    if (!session) return;
+    if (!accountId) {
+      setAgentError("Connect HashPack before training.");
+      return;
+    }
+    try {
+      const { getConnectedAccountId } = await import("@/lib/wallet/hedera-wallet");
+      if (!getConnectedAccountId()) {
+        setAgentError("Wallet session expired — reconnect HashPack, then try again.");
+        return;
+      }
+      await associateModelNftIfNeeded(accountId);
+    } catch (e) {
+      setAgentError(e instanceof Error ? e.message : String(e));
+      return;
+    }
     const prompt = `Yes, start training with dataset "${ref}" (${title}). Inspect it, download, prepare, and queue the job.`;
-    if (!loading) void sendChat(prompt, true);
+    if (!loading) void sendChat(prompt);
     else setMessage(prompt);
   }
 
@@ -281,22 +290,16 @@ export default function HomePage() {
     else setMessage(prompt);
   }
 
-  async function sendChat(overrideMessage?: string, includeNftForTraining = false) {
+  async function sendChat(overrideMessage?: string) {
     const userMsg = (overrideMessage ?? message).trim();
     if (!userMsg) return;
     if (!accountId) {
       setAgentError("Connect your wallet before chatting.");
       return;
     }
-    let activeSession = ap2Session;
-    if (activeSession?.status !== "active") {
+    if (ap2Session?.status !== "active") {
       setShowAp2Setup(true);
-      if (includeNftForTraining) {
-        activeSession = await runAp2Setup(true);
-        if (!activeSession) return;
-      } else {
-        return;
-      }
+      return;
     }
 
     if (!overrideMessage) setMessage("");
@@ -328,7 +331,7 @@ export default function HomePage() {
           thread_id: threadId,
           history,
           user_account_id: accountId,
-          ap2_session_id: activeSession.session_id,
+          ap2_session_id: ap2Session.session_id,
         }),
       });
 
