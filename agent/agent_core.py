@@ -415,7 +415,9 @@ def build_llm() -> ChatGroq:
 
 
 async def _pick_best_dataset_for_use_case(
-    use_case: str, datasets: list[dict[str, Any]]
+    use_case: str,
+    datasets: list[dict[str, Any]],
+    user_message: str = "",
 ) -> dict[str, Any]:
     if len(datasets) <= 1:
         return datasets[0] if datasets else {}
@@ -426,12 +428,14 @@ async def _pick_best_dataset_for_use_case(
                 SystemMessage(
                     content=(
                         "Pick the single most relevant Kaggle dataset for the use case. "
+                        "Ignore unrelated popular datasets (e.g. Ubuntu/Linux when the goal is fraud). "
                         'Respond ONLY with JSON: {"ref": "owner/slug", "reason": "one sentence"}'
                     )
                 ),
                 HumanMessage(
                     content=(
                         f"Use case: {use_case}\n"
+                        f"User message: {user_message}\n"
                         f"Candidates: {truncate_text(json.dumps(datasets, indent=2), 4000)}"
                     )
                 ),
@@ -444,7 +448,7 @@ async def _pick_best_dataset_for_use_case(
                 return ds
     except Exception:
         pass
-    return pick_best_dataset(use_case, datasets)
+    return pick_best_dataset(use_case, datasets, context=user_message)
 
 
 def _emit_tool_ui(name: str, result: str) -> Optional[dict[str, Any]]:
@@ -460,7 +464,7 @@ def _emit_tool_ui(name: str, result: str) -> Optional[dict[str, Any]]:
         if data.get("mode") == "list":
             return {"type": "datasets", "datasets": data.get("datasets", [])}
     if name == "search_kaggle_datasets" and isinstance(data, list) and data:
-        return {"type": "dataset", "dataset": pick_best_dataset("", data)}
+        return {"type": "dataset", "dataset": pick_best_dataset("tabular ml", data)}
     if name == "inspect_kaggle_dataset_tool" and isinstance(data, dict):
         return {"type": "dataset_inspect", "inspect": data}
     if name == "trigger_training_job_tool" and isinstance(data, dict) and data.get("job_id"):
@@ -746,7 +750,7 @@ async def run_agent_chat(
 
     if _wants_alternative_datasets(message):
         datasets = await asyncio.to_thread(
-            search_kaggle_for_use_case, resolved_use_case
+            search_kaggle_for_use_case, resolved_use_case, None, user_message=message
         )
         if datasets:
             yield {"type": "datasets", "datasets": datasets}
@@ -767,11 +771,13 @@ async def run_agent_chat(
     selection_was_inferred = not had_full_selection or selection_changed
     if _should_auto_search(message, selection_was_inferred):
         candidates = await asyncio.to_thread(
-            search_kaggle_for_use_case, resolved_use_case
+            search_kaggle_for_use_case, resolved_use_case, None, user_message=message
         )
         best: Optional[dict[str, Any]] = None
         if candidates:
-            best = await _pick_best_dataset_for_use_case(resolved_use_case, candidates)
+            best = await _pick_best_dataset_for_use_case(
+                resolved_use_case, candidates, user_message=message
+            )
             yield {"type": "dataset", "dataset": best}
         intro = (
             f"**Use case:** {resolved_use_case}\n"

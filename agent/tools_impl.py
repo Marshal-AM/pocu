@@ -34,30 +34,176 @@ def get_architecture(arch_id: str) -> dict[str, Any]:
     raise ValueError(f"Unknown architecture: {arch_id}")
 
 
-def search_kaggle_for_use_case(use_case: str, query: Optional[str] = None) -> list[dict[str, Any]]:
-    q = query or use_case
-    return search_datasets(q, max_results=5)
+_KEYWORD_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "model",
+        "data",
+        "dataset",
+        "tabular",
+        "general",
+        "machine",
+        "learning",
+        "build",
+        "train",
+        "create",
+        "make",
+        "using",
+        "some",
+        "want",
+        "your",
+        "this",
+        "that",
+        "from",
+    }
+)
+
+# Optimized Kaggle search phrases (raw use-case labels are too vague for the API).
+USE_CASE_KAGGLE_QUERIES: dict[str, str] = {
+    "fraud detection": "credit card fraud detection",
+    "heart disease screening": "heart disease classification csv",
+    "customer churn": "customer churn telco csv",
+    "credit default risk": "credit card default payment",
+    "diabetes prediction": "diabetes classification csv",
+    "spam detection": "sms spam ham csv",
+    "demand forecasting": "demand forecasting csv",
+    "predictive maintenance": "predictive maintenance sensor csv",
+}
+
+# Off-topic signals when ranking candidates for a given use-case family.
+_IRRELEVANT_HINTS: dict[str, tuple[str, ...]] = {
+    "fraud": ("ubuntu", "linux", "kernel", "windows", "android", "ios", "dog", "cat", "mnist", "cifar"),
+    "churn": ("ubuntu", "linux", "mnist", "dog", "cat", "fraud"),
+    "heart": ("ubuntu", "linux", "fraud", "churn", "spam"),
+    "spam": ("ubuntu", "linux", "fraud", "heart"),
+    "diabetes": ("ubuntu", "linux", "fraud"),
+    "demand": ("ubuntu", "linux", "fraud", "heart"),
+    "maintenance": ("ubuntu", "linux", "fraud", "spam"),
+    "credit": ("ubuntu", "linux", "kernel", "dog", "cat"),
+}
 
 
-def pick_best_dataset(use_case: str, datasets: list[dict[str, Any]]) -> dict[str, Any]:
+def _use_case_family(use_case: str) -> str:
+    uc = use_case.lower()
+    if "fraud" in uc or "transaction" in uc:
+        return "fraud"
+    if "churn" in uc:
+        return "churn"
+    if "heart" in uc:
+        return "heart"
+    if "spam" in uc:
+        return "spam"
+    if "diabetes" in uc:
+        return "diabetes"
+    if "demand" in uc or "forecast" in uc:
+        return "demand"
+    if "maintenance" in uc:
+        return "maintenance"
+    if "credit" in uc or "default" in uc:
+        return "credit"
+    return ""
+
+
+def _extract_keywords(*texts: str) -> set[str]:
+    words: set[str] = set()
+    for text in texts:
+        for w in re.findall(r"[a-z0-9]+", text.lower()):
+            if len(w) > 2 and w not in _KEYWORD_STOPWORDS:
+                words.add(w)
+    return words
+
+
+def build_kaggle_search_query(use_case: str, user_message: str = "") -> str:
+    """Build a Kaggle search string from use-case label + user message."""
+    uc = use_case.strip()
+    uc_lower = uc.lower()
+    for label, query in USE_CASE_KAGGLE_QUERIES.items():
+        if label in uc_lower or uc_lower in label:
+            base = query
+            break
+    else:
+        base = uc
+
+    msg_keywords = _extract_keywords(user_message)
+    # Prefer domain terms from the user message that are not already in base.
+    base_words = set(re.findall(r"[a-z0-9]+", base.lower()))
+    extras = [w for w in sorted(msg_keywords) if w not in base_words][:4]
+    if extras:
+        return f"{base} {' '.join(extras)}".strip()
+    return base
+
+
+def _dataset_text(ds: dict[str, Any]) -> str:
+    return f"{ds.get('title') or ''} {ds.get('ref') or ''}".lower()
+
+
+def _irrelevance_penalty(use_case: str, ds: dict[str, Any]) -> float:
+    family = _use_case_family(use_case)
+    hints = _IRRELEVANT_HINTS.get(family, ())
+    text = _dataset_text(ds)
+    if any(hint in text for hint in hints):
+        return 1_000_000.0
+    return 0.0
+
+
+def _relevance_overlap(use_case: str, ds: dict[str, Any], context: str = "") -> int:
+    keywords = _extract_keywords(use_case, context)
+    title_words = set(re.findall(r"[a-z0-9]+", _dataset_text(ds)))
+    return len(keywords & title_words)
+
+
+def search_kaggle_for_use_case(
+    use_case: str,
+    query: Optional[str] = None,
+    *,
+    user_message: str = "",
+) -> list[dict[str, Any]]:
+    primary_q = query or build_kaggle_search_query(use_case, user_message)
+    datasets = search_datasets(primary_q, max_results=10)
+
+    if datasets:
+        best = pick_best_dataset(use_case, datasets, context=user_message)
+        if _relevance_overlap(use_case, best, user_message) > 0:
+            return datasets
+
+    # Second pass with message-heavy query when the label-only search was weak.
+    if user_message.strip():
+        msg_q = build_kaggle_search_query(user_message[:120], user_message)
+        if msg_q.lower() != primary_q.lower():
+            alt = search_datasets(msg_q, max_results=10)
+            if alt:
+                return alt
+
+    return datasets
+
+
+def pick_best_dataset(
+    use_case: str,
+    datasets: list[dict[str, Any]],
+    *,
+    context: str = "",
+) -> dict[str, Any]:
     if not datasets:
         raise ValueError("No datasets to rank")
     if len(datasets) == 1:
         return datasets[0]
 
-    keywords = {
-        w for w in re.findall(r"[a-z0-9]+", use_case.lower()) if len(w) > 2
-    }
+    keywords = _extract_keywords(use_case, context)
 
     def score(ds: dict[str, Any]) -> float:
-        title = (ds.get("title") or "").lower()
-        ref = (ds.get("ref") or "").lower()
-        title_words = set(re.findall(r"[a-z0-9]+", f"{title} {ref}"))
+        title_words = set(re.findall(r"[a-z0-9]+", _dataset_text(ds)))
         overlap = len(keywords & title_words)
         votes = float(ds.get("vote_count") or 0)
         usability = float(ds.get("usability_rating") or 0)
         downloads = float(ds.get("download_count") or 0)
-        return overlap * 10_000 + usability * 1_000 + votes + downloads * 0.01
+        popularity = usability * 1_000 + votes + downloads * 0.01
+        if overlap == 0:
+            # Never let vote count beat semantic match — weak overlap sorts last.
+            return popularity - _irrelevance_penalty(use_case, ds) - 500_000
+        return overlap * 100_000 + popularity - _irrelevance_penalty(use_case, ds)
 
     return max(datasets, key=score)
 
@@ -67,11 +213,15 @@ def search_kaggle_result(
     query: Optional[str] = None,
     *,
     show_all: bool = False,
+    user_message: str = "",
 ) -> dict[str, Any]:
-    datasets = search_kaggle_for_use_case(use_case, query)
+    datasets = search_kaggle_for_use_case(use_case, query, user_message=user_message)
     if show_all or not datasets:
         return {"mode": "list", "datasets": datasets}
-    return {"mode": "best", "dataset": pick_best_dataset(use_case, datasets)}
+    return {
+        "mode": "best",
+        "dataset": pick_best_dataset(use_case, datasets, context=user_message),
+    }
 
 
 def inspect_kaggle_dataset(dataset_ref: str) -> dict[str, Any]:
