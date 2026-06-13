@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/components/agent/ChatPanel";
 import type {
   Architecture,
@@ -15,7 +15,9 @@ import {
 } from "../components/WalletProvider";
 import {
   fetchAp2Session,
+  isAp2SessionActive,
   setupAp2Session,
+  type Ap2SessionState,
   type Ap2SetupStep,
 } from "@/lib/wallet/ap2-session";
 
@@ -42,10 +44,40 @@ export default function HomePage() {
   const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
   const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
   const { accountId, ap2Session, setAp2Session } = useWallet();
+  const loadThreadGeneration = useRef(0);
+  const ap2SetupInProgress = useRef(false);
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
-  const ap2SessionActive = ap2Session?.status === "active";
+  const ap2SessionActive = isAp2SessionActive(ap2Session);
+
+  const applyAp2Session = useCallback(
+    (session: Ap2SessionState | null, tid: string | null) => {
+      if (!session || !accountId || !tid) return;
+      setAp2Session(session);
+      storeAp2Session(accountId, tid, session);
+      if (isAp2SessionActive(session)) {
+        setShowAp2Setup(false);
+        setAp2SetupStatus(null);
+        setAp2SetupLoading(false);
+      }
+    },
+    [accountId, setAp2Session]
+  );
+
+  const resolveStoredAp2Session = useCallback(
+    async (tid: string): Promise<Ap2SessionState | null> => {
+      if (!accountId) return null;
+      const stored = loadStoredAp2Session(accountId, tid);
+      if (!stored?.session_id) return null;
+      try {
+        return await fetchAp2Session(stored.session_id, accountId);
+      } catch {
+        return stored;
+      }
+    },
+    [accountId]
+  );
 
   const loadThreads = useCallback(async () => {
     if (!accountId) {
@@ -65,10 +97,12 @@ export default function HomePage() {
   const loadThread = useCallback(
     async (id: string) => {
       if (!accountId) return;
+      const generation = ++loadThreadGeneration.current;
       try {
         const res = await fetch(
           `/api/threads/${id}?account_id=${encodeURIComponent(accountId)}`
         );
+        if (generation !== loadThreadGeneration.current) return;
         if (!res.ok) {
           if (res.status === 404 && threadStorageKey) {
             localStorage.removeItem(threadStorageKey);
@@ -77,22 +111,29 @@ export default function HomePage() {
           return;
         }
         const data = (await res.json()) as ChatThread & { messages?: ChatBlock[] };
+        if (generation !== loadThreadGeneration.current) return;
         setThreadId(data.id);
         if (threadStorageKey) localStorage.setItem(threadStorageKey, data.id);
         setChat(data.messages ?? []);
         if (data.title) setUseCase(data.title);
 
-        const stored = loadStoredAp2Session(accountId, data.id);
-        if (stored?.session_id) {
-          const live = await fetchAp2Session(stored.session_id, accountId);
-          if (live?.status === "active") {
-            setAp2Session(live);
-            setShowAp2Setup(false);
-          } else {
-            setAp2Session(null);
-            setShowAp2Setup(true);
-          }
+        if (ap2SetupInProgress.current) return;
+
+        const live = await resolveStoredAp2Session(data.id);
+        if (generation !== loadThreadGeneration.current) return;
+        if (ap2SetupInProgress.current) return;
+
+        if (isAp2SessionActive(live)) {
+          applyAp2Session(live, data.id);
         } else {
+          if (generation !== loadThreadGeneration.current || ap2SetupInProgress.current) {
+            return;
+          }
+          const storedNow = loadStoredAp2Session(accountId, data.id);
+          if (isAp2SessionActive(storedNow)) {
+            applyAp2Session(storedNow, data.id);
+            return;
+          }
           setAp2Session(null);
           setShowAp2Setup(true);
         }
@@ -100,10 +141,11 @@ export default function HomePage() {
         /* ignore */
       }
     },
-    [accountId, threadStorageKey, setAp2Session]
+    [accountId, threadStorageKey, setAp2Session, applyAp2Session, resolveStoredAp2Session]
   );
 
   const startNewChat = useCallback(() => {
+    loadThreadGeneration.current += 1;
     setThreadId(null);
     if (threadStorageKey) localStorage.removeItem(threadStorageKey);
     setChat([]);
@@ -161,6 +203,14 @@ export default function HomePage() {
     }
   }, [accountId, loadThreads, loadThread, threadStorageKey, setAp2Session]);
 
+  useEffect(() => {
+    if (ap2SessionActive) {
+      setShowAp2Setup(false);
+      setAp2SetupLoading(false);
+      setAp2SetupStatus(null);
+    }
+  }, [ap2SessionActive]);
+
   function upsertAssistantBlock(updater: (block: ChatBlock) => ChatBlock) {
     setChat((c) => {
       const next = [...c];
@@ -194,11 +244,13 @@ export default function HomePage() {
     return thread.id;
   }
 
-  async function runAp2Setup(includeNftAssociate = false) {
+  async function runAp2Setup(includeNftAssociate = false): Promise<Ap2SessionState | null> {
     if (!accountId) {
       setAgentError("Connect HashPack before authorizing.");
-      return;
+      return null;
     }
+    loadThreadGeneration.current += 1;
+    ap2SetupInProgress.current = true;
     setAp2SetupLoading(true);
     setAp2SetupStatus(null);
     setAgentError(null);
@@ -212,13 +264,16 @@ export default function HomePage() {
         includeNftAssociate,
         onStep: (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg),
       });
-      setAp2Session(session);
-      storeAp2Session(accountId, tid, session);
-      setShowAp2Setup(false);
-      setAp2SetupStatus(null);
+      if (!isAp2SessionActive(session)) {
+        throw new Error("AP2 session is not active after authorization");
+      }
+      applyAp2Session(session, tid);
+      return session;
     } catch (e) {
       setAgentError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
+      ap2SetupInProgress.current = false;
       setAp2SetupLoading(false);
     }
   }
@@ -238,8 +293,8 @@ export default function HomePage() {
       setShowAp2Setup(true);
       return;
     }
-    await runAp2Setup(true);
-    if (!ap2Session?.session_id) return;
+    const session = await runAp2Setup(true);
+    if (!isAp2SessionActive(session)) return;
     const prompt = `Yes, start training with dataset "${ref}" (${title}). Inspect it, download, prepare, and queue the job.`;
     if (!loading) void sendChat(prompt, true);
     else setMessage(prompt);
@@ -258,10 +313,14 @@ export default function HomePage() {
       setAgentError("Connect your wallet before chatting.");
       return;
     }
-    if (!ap2SessionActive) {
+    let sessionReady = ap2SessionActive;
+    if (!sessionReady) {
       setShowAp2Setup(true);
-      if (includeNftForTraining) await runAp2Setup(true);
-      else return;
+      if (includeNftForTraining) {
+        const session = await runAp2Setup(true);
+        sessionReady = isAp2SessionActive(session);
+      }
+      if (!sessionReady) return;
     }
     if (!overrideMessage) setMessage("");
     setChat((c) => [...c, { role: "user", text: userMsg }]);
