@@ -177,7 +177,8 @@ def trigger_training_job(
     target_column: str,
     prepared: dict[str, Any],
     user_prompt: str = "",
-    wallet_auth: Optional[dict[str, Any]] = None,
+    ap2_session_id: str = "",
+    user_account_id: str = "",
 ) -> dict[str, Any]:
     arch = get_architecture(architecture_id)
     job_uuid = prepared.get("job_id") or str(uuid.uuid4())
@@ -202,21 +203,12 @@ def trigger_training_job(
         "data_csv_path": prepared.get("csv_path"),
         "prepared_meta_path": prepared["metadata_path"],
         "manifest_path": manifest_path,
-        "acp_order_id": (wallet_auth or {}).get("acp_order_id") or job_uuid,
-        "acp_status": "PENDING",
-        "acp_progress_pct": 0,
     }
-    if wallet_auth:
-        row.update(
-            {
-                "user_account_id": wallet_auth.get("user_account_id"),
-                "ap2_mandate": wallet_auth.get("ap2_mandate"),
-                "ap2_mandate_hash": wallet_auth.get("ap2_mandate_hash"),
-                "ap2_signature": wallet_auth.get("ap2_signature"),
-                "allowance_tx_id": wallet_auth.get("allowance_tx_id"),
-                "allowance_hbar": wallet_auth.get("allowance_hbar", 200),
-            }
-        )
+    if ap2_session_id:
+        row["ap2_session_id"] = ap2_session_id
+    if user_account_id:
+        row["user_account_id"] = user_account_id
+        row["allowance_hbar"] = float(os.getenv("ALLOWANCE_HBAR", "200"))
     created = create_job(row)
     try:
         upload_job_prepared_files(job_uuid, prepared["metadata_path"])

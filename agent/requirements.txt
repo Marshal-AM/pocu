@@ -9,3 +9,8 @@ supabase>=2.10.0
 kaggle>=1.6.0
 pandas>=2.2.0
 pydantic>=2.0.0
+cryptography>=46.0.0
+jwcrypto>=1.5.0
+sd-jwt>=0.10.4
+# Official AP2 Python SDK (docs/AP2 is local reference only — not vendored)
+ap2 @ git+https://github.com/google-agentic-commerce/AP2.git@main

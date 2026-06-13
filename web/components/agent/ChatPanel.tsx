@@ -29,8 +29,11 @@ interface ChatPanelProps {
   message: string;
   loading: boolean;
   pipelineStatus: string | null;
-  acpProgressPct?: number;
+  jobProgressPct?: number;
+  chatDisabled?: boolean;
   onThreadChange: (id: string | null) => void;
+  onNewChat?: () => void;
+  onOpenAp2Setup?: () => void;
   onMessageChange: (value: string) => void;
   onSend: () => void;
   onUseCaseChange: (value: string) => void;
@@ -59,8 +62,11 @@ export function ChatPanel({
   message,
   loading,
   pipelineStatus,
-  acpProgressPct,
+  jobProgressPct,
+  chatDisabled = false,
   onThreadChange,
+  onNewChat,
+  onOpenAp2Setup,
   onMessageChange,
   onSend,
   onUseCaseChange,
@@ -73,7 +79,7 @@ export function ChatPanel({
   onShowAlternatives,
   onDatasetSelect,
 }: ChatPanelProps) {
-  const canSend = Boolean(message.trim()) && !loading;
+  const canSend = Boolean(message.trim()) && !loading && !chatDisabled;
   const isEmpty = chat.length === 0;
   const showTyping = loading && !pipelineStatus;
 
@@ -172,7 +178,7 @@ export function ChatPanel({
 
         {loading && pipelineStatus && (
           <div className="border-t border-border/50 px-5 py-2">
-            <PipelineStatus message={pipelineStatus} progressPct={acpProgressPct} />
+            <PipelineStatus message={pipelineStatus} progressPct={jobProgressPct} />
           </div>
         )}
 
@@ -180,9 +186,14 @@ export function ChatPanel({
           value={message}
           onChange={onMessageChange}
           onSend={onSend}
-          disabled={loading}
+          disabled={loading || chatDisabled}
           loading={loading}
           canSend={canSend}
+          placeholder={
+            chatDisabled
+              ? "Authorize AP2 session below to send messages…"
+              : "Describe what you want to build…"
+          }
         />
       </ChatWindowChrome>
     </div>

@@ -1,4 +1,6 @@
-export const ALLOWANCE_HBAR = 200;
+export const ALLOWANCE_HBAR = parseFloat(process.env.NEXT_PUBLIC_ALLOWANCE_HBAR ?? "200");
+export const SESSION_BUDGET_HBAR = parseFloat(process.env.NEXT_PUBLIC_AP2_SESSION_BUDGET_HBAR ?? "200");
+export const CHAT_TURN_HBAR = parseFloat(process.env.NEXT_PUBLIC_AP2_CHAT_TURN_HBAR ?? "0.1");
 export const MANDATE_TTL_SEC = 2 * 60 * 60;
 
 export function requireWalletConfig(): {

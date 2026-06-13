@@ -73,9 +73,9 @@ def _load_hcs_topic() -> str:
     return os.getenv("HCS_TOPIC_ID", "")
 
 
-def _publish_acp_complete(
+def _publish_training_complete(
     topic_id: str,
-    order_id: str,
+    job_id: str,
     deliverable: dict[str, Any],
     total_spent: float,
 ) -> Optional[str]:
@@ -87,10 +87,8 @@ def _publish_acp_complete(
         client, _, _ = _get_hedera_client()
         body = json.dumps(
             {
-                "type": "ACP_STATUS",
-                "order_id": order_id,
-                "status": "COMPLETE",
-                "progress_pct": 100,
+                "type": "TRAINING_COMPLETE",
+                "job_id": job_id,
                 "deliverable": deliverable,
                 "total_spent_hbar": total_spent,
                 "ts": int(datetime.now(timezone.utc).timestamp() * 1000),
@@ -103,10 +101,10 @@ def _publish_acp_complete(
         )
         receipt = submit_tx.execute(client)
         tx_id = str(submit_tx.transaction_id)
-        print(f"[acp] order complete order_id={order_id} hcs_tx={tx_id} status={receipt.status}")
+        print(f"[hcs] training complete job_id={job_id} hcs_tx={tx_id} status={receipt.status}")
         return tx_id
     except Exception as e:
-        print(f"[acp] HCS COMPLETE publish warning: {e}")
+        print(f"[hcs] TRAINING_COMPLETE publish warning: {e}")
         return None
 
 
@@ -243,16 +241,12 @@ def mint_model_nft(job: dict[str, Any]) -> dict[str, Any]:
     transfer_id = str(transfer_tx.transaction_id)
     print(f"[hts] transfer tx={transfer_id} → {user_account}")
 
-    total_spent = float(job.get("total_spent_hbar") or job.get("mpp_total_spent_hbar") or 0)
-    manifest = job.get("manifest") or {}
-    if isinstance(manifest, dict) and manifest.get("mppTotalSpentHbar"):
-        total_spent = float(manifest["mppTotalSpentHbar"])
+    total_spent = float(job.get("total_spent_hbar") or 0)
 
     topic_id = job.get("hcs_topic_id") or _load_hcs_topic()
-    order_id = str(job.get("acp_order_id") or job_id)
-    hedera_proof = _publish_acp_complete(
+    hedera_proof = _publish_training_complete(
         topic_id,
-        order_id,
+        job_id,
         {
             "model_nft": token_id_str,
             "model_nft_serial": serial,
@@ -269,8 +263,6 @@ def mint_model_nft(job: dict[str, Any]) -> dict[str, Any]:
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "model_nft_token_id": token_id_str,
             "model_nft_serial": serial,
-            "acp_status": "COMPLETE",
-            "acp_progress_pct": 100,
             "total_spent_hbar": total_spent,
         }
     ).eq("id", job_id).execute()

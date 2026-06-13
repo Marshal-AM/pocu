@@ -257,7 +257,7 @@ export default function JobDetailPage() {
               value={
                 <>
                   {String(job.acp_order_id ?? "—")}
-                  {job.acp_status ? ` · ${String(job.acp_status)}` : ""}
+                  {job.status ? ` · ${String(job.status)}` : ""}
                   {job.acp_progress_pct != null
                     ? ` (${String(job.acp_progress_pct)}%)`
                     : ""}

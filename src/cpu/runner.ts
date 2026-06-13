@@ -17,12 +17,7 @@ import {
   shouldPinManifest,
 } from "../ipfs/pinata";
 import { createHcsTopic } from "../hcs";
-import {
-  resetMppSpendTracker,
-  getMppCumulativeSpentHbar,
-  reimburseGasReceipt,
-  type MppContext,
-} from "../protocols/mpp";
+import { settleBatchViaAgent } from "../protocols/ap2-settle";
 
 export interface TrainResult {
   jobId: string;
@@ -36,7 +31,6 @@ export interface TrainResult {
 export async function runCpuTraining(params: {
   deployment: DeploymentAddresses;
   signer: Signer;
-  /** Override for tests; production creates a fresh topic per run. */
   topicId?: string;
   samples: TabularSample[];
   dataHash: string;
@@ -53,22 +47,9 @@ export async function runCpuTraining(params: {
 
   const program = compileMlpProgram(spec, params.samples, jobId, params.dataHash);
 
-  resetMppSpendTracker();
-
-  let mppContext: MppContext | undefined;
-  const userAccountId = process.env.USER_ACCOUNT_ID;
-  const agentAccountId = process.env.AGENT_ACCOUNT_ID ?? process.env.ACCOUNT_ID;
-  if (userAccountId && agentAccountId && process.env.AP2_MANDATE_HASH) {
-    mppContext = {
-      ownerAccountId: userAccountId,
-      agentAccountId,
-      mandateHash: process.env.AP2_MANDATE_HASH,
-      orderId: process.env.ACP_ORDER_ID ?? process.env.JOB_ID ?? jobId,
-      allowanceCapHbar: parseFloat(process.env.ALLOWANCE_HBAR ?? "200"),
-    };
-    params.log?.info(
-      `[mpp] enabled owner=${userAccountId} cap=${mppContext.allowanceCapHbar} HBAR`
-    );
+  const ap2SessionId = process.env.AP2_SESSION_ID?.trim();
+  if (ap2SessionId) {
+    params.log?.info(`[ap2] batch settlement via session=${ap2SessionId.slice(0, 8)}…`);
   }
 
   const ctx: DispatcherContext = {
@@ -76,19 +57,22 @@ export async function runCpuTraining(params: {
     signer: params.signer,
     topicId,
     log: params.log,
-    mppContext,
-    acpOrderId: process.env.ACP_ORDER_ID ?? process.env.JOB_ID,
+    ap2SessionId,
+    jobId: runId ?? jobId,
   };
 
   params.log?.info(`Program: ${program.instructions.length} instructions, ${spec.epochs} epochs`);
 
   const registerReceipt = await registerCpuJob(ctx, program);
-  await reimburseGasReceipt({
-    ctx: mppContext,
-    batchIndex: -1,
-    receipt: registerReceipt,
-    log: params.log,
-  });
+  if (ap2SessionId) {
+    await settleBatchViaAgent({
+      sessionId: ap2SessionId,
+      batchIndex: -1,
+      receipt: registerReceipt,
+      jobId: runId ?? jobId,
+      log: params.log,
+    });
+  }
   const result = await dispatchProgram(ctx, program);
 
   const harvested = await harvestTxHashes(64);
@@ -130,12 +114,15 @@ export async function runCpuTraining(params: {
     { gasLimit: TX_GAS_LIMIT, log: params.log, txLabel: "commitCpuModel" }
   );
   result.txHashes.push(commitReceipt.hash);
-  await reimburseGasReceipt({
-    ctx: mppContext,
-    batchIndex: -2,
-    receipt: commitReceipt,
-    log: params.log,
-  });
+  if (ap2SessionId) {
+    await settleBatchViaAgent({
+      sessionId: ap2SessionId,
+      batchIndex: -2,
+      receipt: commitReceipt,
+      jobId: runId ?? jobId,
+      log: params.log,
+    });
+  }
 
   await publishHcsCommit(topicId, jobId, result.eventLogHash, params.log);
 
@@ -155,7 +142,7 @@ export async function runCpuTraining(params: {
     txMatrixSnapshot,
     deployment: params.deployment,
     trainingMode: "onchain-cpu",
-    mppTotalSpentHbar: getMppCumulativeSpentHbar(),
+    ap2SessionId: ap2SessionId ?? null,
   };
 
   if (shouldPinManifest()) {

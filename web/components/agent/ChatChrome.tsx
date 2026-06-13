@@ -109,6 +109,7 @@ export function ChatComposer({
   disabled,
   loading,
   canSend,
+  placeholder = "Message the training agent…",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -116,13 +117,14 @@ export function ChatComposer({
   disabled?: boolean;
   loading?: boolean;
   canSend: boolean;
+  placeholder?: string;
 }) {
   return (
     <div className="shrink-0 border-t border-border/80 bg-background/50 p-4 sm:p-5">
       <div className="flex items-end gap-2 rounded-2xl border border-border bg-secondary/40 p-2 pl-4 shadow-inner ring-1 ring-white/[0.03] focus-within:border-accent/50 focus-within:ring-accent/20">
         <textarea
           rows={1}
-          placeholder="Message the training agent…"
+          placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

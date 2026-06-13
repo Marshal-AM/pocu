@@ -11,8 +11,7 @@ export type HcsMessageType =
   | "BATCH_EXECUTE"
   | "PROGRAM_END"
   | "COMMIT_WEIGHTS"
-  | "ACP_ORDER"
-  | "ACP_STATUS";
+  | "TRAINING_COMPLETE";
 
 export interface HcsPublishResult {
   sequenceNumber: number;

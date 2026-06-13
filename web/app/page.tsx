@@ -7,9 +7,17 @@ import type {
   ChatBlock,
   ChatThread,
 } from "@/components/agent/types";
-import { useWallet } from "../components/WalletProvider";
-import { authorizeTraining } from "@/lib/wallet/authorize-training";
-import type { WalletAuthResult } from "@/lib/wallet/authorize-training";
+import { Ap2SetupGate } from "@/components/Ap2SetupGate";
+import {
+  useWallet,
+  loadStoredAp2Session,
+  storeAp2Session,
+} from "../components/WalletProvider";
+import {
+  fetchAp2Session,
+  setupAp2Session,
+  type Ap2SetupStep,
+} from "@/lib/wallet/ap2-session";
 
 export default function HomePage() {
   const [architectures, setArchitectures] = useState<Architecture[]>([]);
@@ -25,16 +33,19 @@ export default function HomePage() {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string | null>(null);
-  const [acpStatus, setAcpStatus] = useState<{
+  const [jobProgress, setJobProgress] = useState<{
     status?: string;
     progress_pct?: number;
     message?: string;
   } | null>(null);
-  const { accountId, walletAuth, setWalletAuth } = useWallet();
+  const [showAp2Setup, setShowAp2Setup] = useState(false);
+  const [ap2SetupLoading, setAp2SetupLoading] = useState(false);
+  const [ap2SetupStatus, setAp2SetupStatus] = useState<string | null>(null);
+  const { accountId, ap2Session, setAp2Session } = useWallet();
 
   const selectedArch = architectures.find((a) => a.id === architectureId);
-
   const threadStorageKey = accountId ? `pocu_thread_id:${accountId}` : null;
+  const ap2SessionActive = ap2Session?.status === "active";
 
   const loadThreads = useCallback(async () => {
     if (!accountId) {
@@ -70,11 +81,26 @@ export default function HomePage() {
         if (threadStorageKey) localStorage.setItem(threadStorageKey, data.id);
         setChat(data.messages ?? []);
         if (data.title) setUseCase(data.title);
+
+        const stored = loadStoredAp2Session(accountId, data.id);
+        if (stored?.session_id) {
+          const live = await fetchAp2Session(stored.session_id, accountId);
+          if (live?.status === "active") {
+            setAp2Session(live);
+            setShowAp2Setup(false);
+          } else {
+            setAp2Session(null);
+            setShowAp2Setup(true);
+          }
+        } else {
+          setAp2Session(null);
+          setShowAp2Setup(true);
+        }
       } catch {
         /* ignore */
       }
     },
-    [accountId, threadStorageKey]
+    [accountId, threadStorageKey, setAp2Session]
   );
 
   const startNewChat = useCallback(() => {
@@ -84,7 +110,9 @@ export default function HomePage() {
     setMessage("");
     setAgentPickedUseCase(false);
     setAgentPickedArch(false);
-  }, [threadStorageKey]);
+    setAp2Session(null);
+    setShowAp2Setup(true);
+  }, [threadStorageKey, setAp2Session]);
 
   const loadArchs = useCallback(async () => {
     const q = tierFilter ? `?tier=${tierFilter}` : "";
@@ -117,6 +145,7 @@ export default function HomePage() {
       setThreads([]);
       setThreadId(null);
       setChat([]);
+      setAp2Session(null);
       return;
     }
     void loadThreads();
@@ -127,8 +156,10 @@ export default function HomePage() {
     else {
       setThreadId(null);
       setChat([]);
+      setAp2Session(null);
+      setShowAp2Setup(true);
     }
-  }, [accountId, loadThreads, loadThread, threadStorageKey]);
+  }, [accountId, loadThreads, loadThread, threadStorageKey, setAp2Session]);
 
   function upsertAssistantBlock(updater: (block: ChatBlock) => ChatBlock) {
     setChat((c) => {
@@ -143,70 +174,101 @@ export default function HomePage() {
     });
   }
 
-  async function ensureWalletAuth(intent: string): Promise<WalletAuthResult | null> {
+  async function ensureThreadId(): Promise<string | null> {
+    if (threadId) return threadId;
+    if (!accountId) return null;
+    const res = await fetch("/api/threads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: useCase || "New chat",
+        use_case: useCase,
+        architecture_id: architectureId,
+        user_account_id: accountId,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const thread = (await res.json()) as ChatThread;
+    setThreadId(thread.id);
+    if (threadStorageKey) localStorage.setItem(threadStorageKey, thread.id);
+    return thread.id;
+  }
+
+  async function runAp2Setup(includeNftAssociate = false) {
     if (!accountId) {
-      setAgentError("Connect HashPack before starting training.");
-      return null;
+      setAgentError("Connect HashPack before authorizing.");
+      return;
     }
-    if (walletAuth) return walletAuth;
+    setAp2SetupLoading(true);
+    setAp2SetupStatus(null);
+    setAgentError(null);
     try {
-      setAgentError(null);
-      const auth = await authorizeTraining(intent, (_step, statusMessage) => {
-        setPipelineStatus(statusMessage);
+      const tid = await ensureThreadId();
+      if (!tid) throw new Error("Could not create chat thread");
+      const session = await setupAp2Session({
+        threadId: tid,
+        userAccountId: accountId,
+        intent: useCase || "POCU chat and on-chain ML training",
+        includeNftAssociate,
+        onStep: (_step: Ap2SetupStep, msg: string) => setAp2SetupStatus(msg),
       });
-      setWalletAuth(auth);
-      setPipelineStatus(null);
-      return auth;
+      setAp2Session(session);
+      storeAp2Session(accountId, tid, session);
+      setShowAp2Setup(false);
+      setAp2SetupStatus(null);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setAgentError(msg);
-      setPipelineStatus(null);
-      return null;
+      setAgentError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAp2SetupLoading(false);
     }
   }
 
   async function handleDatasetSelect(ref: string, title: string) {
-    const intent = useCase || title;
-    const auth = await ensureWalletAuth(intent);
-    if (!auth) return;
-    const prompt = `Use dataset "${ref}" (${title}). Inspect it, download, prepare, and start the training job.`;
-    if (!loading) {
-      void sendChat(prompt, auth);
-    } else {
-      setMessage(prompt);
+    if (!ap2SessionActive) {
+      setShowAp2Setup(true);
+      return;
     }
+    const prompt = `Use dataset "${ref}" (${title}). Inspect it, download, prepare, and start the training job.`;
+    if (!loading) void sendChat(prompt, true);
+    else setMessage(prompt);
   }
 
   async function handleStartTraining(ref: string, title: string) {
-    const intent = useCase || title;
-    const auth = await ensureWalletAuth(intent);
-    if (!auth) return;
-    const prompt = `Yes, start training with dataset "${ref}" (${title}). Inspect it, download, prepare, and queue the job.`;
-    if (!loading) {
-      void sendChat(prompt, auth);
-    } else {
-      setMessage(prompt);
+    if (!ap2SessionActive) {
+      setShowAp2Setup(true);
+      return;
     }
+    await runAp2Setup(true);
+    if (!ap2Session?.session_id) return;
+    const prompt = `Yes, start training with dataset "${ref}" (${title}). Inspect it, download, prepare, and queue the job.`;
+    if (!loading) void sendChat(prompt, true);
+    else setMessage(prompt);
   }
 
   function handleShowAlternatives() {
     const prompt = "Show me other dataset options for this use case.";
-    if (!loading) {
-      void sendChat(prompt);
-    } else {
-      setMessage(prompt);
-    }
+    if (!loading) void sendChat(prompt);
+    else setMessage(prompt);
   }
 
-  async function sendChat(overrideMessage?: string, authOverride?: WalletAuthResult) {
+  async function sendChat(overrideMessage?: string, includeNftForTraining = false) {
     const userMsg = (overrideMessage ?? message).trim();
     if (!userMsg) return;
+    if (!accountId) {
+      setAgentError("Connect your wallet before chatting.");
+      return;
+    }
+    if (!ap2SessionActive) {
+      setShowAp2Setup(true);
+      if (includeNftForTraining) await runAp2Setup(true);
+      else return;
+    }
     if (!overrideMessage) setMessage("");
     setChat((c) => [...c, { role: "user", text: userMsg }]);
     setLoading(true);
     setAgentError(null);
     setPipelineStatus(null);
-    setAcpStatus(null);
+    setJobProgress(null);
 
     try {
       const history = threadId
@@ -220,10 +282,6 @@ export default function HomePage() {
             return parts;
           });
 
-      const auth = authOverride ?? walletAuth;
-      if (!accountId) {
-        throw new Error("Connect your wallet before chatting.");
-      }
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,17 +292,7 @@ export default function HomePage() {
           thread_id: threadId,
           history,
           user_account_id: accountId,
-          wallet_auth: auth
-            ? {
-                user_account_id: auth.user_account_id,
-                mandate: auth.mandate,
-                mandate_signature: auth.mandate_signature,
-                allowance_tx_id: auth.allowance_tx_id,
-                associate_tx_id: auth.associate_tx_id,
-                initiation_tx_id: auth.initiation_tx_id,
-                acp_order_id: auth.acp_order_id,
-              }
-            : undefined,
+          ap2_session_id: ap2Session?.session_id,
         }),
       });
 
@@ -252,9 +300,7 @@ export default function HomePage() {
         const err = await res.text();
         throw new Error(err || `Chat failed (${res.status})`);
       }
-      if (!res.body) {
-        throw new Error("No response body from agent");
-      }
+      if (!res.body) throw new Error("No response body from agent");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -288,12 +334,8 @@ export default function HomePage() {
 
             if (event.type === "status" && event.message) {
               setPipelineStatus(event.message);
-              upsertAssistantBlock((block) => ({
-                ...block,
-                text: block.text ?? "",
-              }));
-            } else if (event.type === "acp_status") {
-              setAcpStatus({
+            } else if (event.type === "job_progress") {
+              setJobProgress({
                 status: event.status,
                 progress_pct: event.progress_pct,
                 message: event.message,
@@ -377,50 +419,63 @@ export default function HomePage() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <ChatPanel
-        agentError={agentError}
-        threadId={threadId}
-        threads={threads}
-        useCase={useCase}
-        agentPickedUseCase={agentPickedUseCase}
-        agentPickedArch={agentPickedArch}
-        tierFilter={tierFilter}
-        architectureId={architectureId}
-        architectures={architectures}
-        selectedArch={selectedArch}
-        chat={chat}
-        message={message}
-        loading={loading}
-        pipelineStatus={pipelineStatus}
-        acpProgressPct={acpStatus?.progress_pct}
-        onThreadChange={handleThreadChange}
-        onMessageChange={setMessage}
-        onSend={() => void sendChat()}
-        onUseCaseChange={(value) => {
-          setUseCase(value);
-          setAgentPickedUseCase(false);
-        }}
-        onClearUseCase={() => {
-          setUseCase("");
-          setAgentPickedUseCase(false);
-        }}
-        onPresetSelect={(chip) => {
-          setUseCase(chip);
-          setAgentPickedUseCase(false);
-        }}
-        onTierFilterChange={setTierFilter}
-        onArchitectureSelect={(id) => {
-          setArchitectureId(id);
-          setAgentPickedArch(false);
-        }}
-        onClearArchitecture={() => {
-          setArchitectureId("");
-          setAgentPickedArch(false);
-        }}
-        onStartTraining={handleStartTraining}
-        onShowAlternatives={handleShowAlternatives}
-        onDatasetSelect={handleDatasetSelect}
-      />
+      <Ap2SetupGate
+        sessionActive={ap2SessionActive}
+        showSetup={showAp2Setup}
+        setupLoading={ap2SetupLoading}
+        setupStatus={ap2SetupStatus}
+        onAuthorize={() => void runAp2Setup(false)}
+        onOpenSetup={() => setShowAp2Setup(true)}
+        onDismissSetup={() => setShowAp2Setup(false)}
+      >
+        <ChatPanel
+          agentError={agentError}
+          threadId={threadId}
+          threads={threads}
+          useCase={useCase}
+          agentPickedUseCase={agentPickedUseCase}
+          agentPickedArch={agentPickedArch}
+          tierFilter={tierFilter}
+          architectureId={architectureId}
+          architectures={architectures}
+          selectedArch={selectedArch}
+          chat={chat}
+          message={message}
+          loading={loading}
+          pipelineStatus={pipelineStatus}
+          jobProgressPct={jobProgress?.progress_pct}
+          chatDisabled={!ap2SessionActive}
+          onThreadChange={handleThreadChange}
+          onNewChat={startNewChat}
+          onOpenAp2Setup={() => setShowAp2Setup(true)}
+          onMessageChange={setMessage}
+          onSend={() => void sendChat()}
+          onUseCaseChange={(value) => {
+            setUseCase(value);
+            setAgentPickedUseCase(false);
+          }}
+          onClearUseCase={() => {
+            setUseCase("");
+            setAgentPickedUseCase(false);
+          }}
+          onPresetSelect={(chip) => {
+            setUseCase(chip);
+            setAgentPickedUseCase(false);
+          }}
+          onTierFilterChange={setTierFilter}
+          onArchitectureSelect={(id) => {
+            setArchitectureId(id);
+            setAgentPickedArch(false);
+          }}
+          onClearArchitecture={() => {
+            setArchitectureId("");
+            setAgentPickedArch(false);
+          }}
+          onStartTraining={handleStartTraining}
+          onShowAlternatives={handleShowAlternatives}
+          onDatasetSelect={handleDatasetSelect}
+        />
+      </Ap2SetupGate>
     </div>
   );
 }

@@ -4,7 +4,7 @@ const AGENT_URL = process.env.AGENT_SERVICE_URL ?? "http://127.0.0.1:8000";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const res = await fetch(`${AGENT_URL}/authorize`, {
+  const res = await fetch(`${AGENT_URL}/ap2/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

@@ -1,6 +1,6 @@
 import { getArchitectureById } from "../cpu/models/architectures";
 
-const DEFAULT_BATCH_BUFFER = parseFloat(process.env.MPP_GAS_BUFFER_HBAR ?? "15");
+export const DEFAULT_BATCH_BUFFER = parseFloat(process.env.BATCH_GAS_BUFFER_HBAR ?? "15");
 const DEFAULT_JOB_BUFFER = parseFloat(process.env.JOB_COST_BUFFER_HBAR ?? "10");
 export const ALLOWANCE_CAP_HBAR = parseFloat(process.env.ALLOWANCE_HBAR ?? "200");
 

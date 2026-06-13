@@ -509,36 +509,38 @@ async def _execute_train_pipeline(
     message: str,
     use_case: str,
     architecture_id: str,
-    wallet_auth: Optional[dict[str, Any]] = None,
+    ap2_session_id: str = "",
+    user_account_id: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     dataset_ref = _extract_dataset_ref(message)
     if not dataset_ref:
         return
 
-    if not wallet_auth:
+    if not ap2_session_id or not user_account_id:
         yield {
             "type": "text",
             "content": (
-                "Connect HashPack and authorize training (200 HBAR allowance + AP2 mandate) "
+                "Connect HashPack and authorize an AP2 session (200 HBAR allowance) "
                 "before starting a training job."
             ),
         }
         return
 
     from cost_estimate import exceeds_allowance_cap
-    from hedera_auth import validate_wallet_auth
+    from pocu_ap2.config import SESSION_BUDGET_HBAR
+    from pocu_ap2.session import validate_active_session
 
     try:
-        auth_fields = await asyncio.to_thread(validate_wallet_auth, wallet_auth)
+        await asyncio.to_thread(validate_active_session, ap2_session_id, user_account_id)
     except Exception as e:
-        yield {"type": "text", "content": f"Wallet authorization failed: {e}"}
+        yield {"type": "text", "content": f"AP2 session validation failed: {e}"}
         return
 
     if exceeds_allowance_cap(architecture_id, 2, 1):
         yield {
             "type": "text",
             "content": (
-                f"Estimated training cost exceeds the {auth_fields['allowance_hbar']} HBAR allowance "
+                f"Estimated training cost exceeds the {SESSION_BUDGET_HBAR} HBAR session budget "
                 f"for architecture `{architecture_id}`. Choose a smaller architecture."
             ),
         }
@@ -551,8 +553,7 @@ async def _execute_train_pipeline(
 
     try:
         yield {
-            "type": "acp_status",
-            "order_id": None,
+            "type": "job_progress",
             "status": "PROCESSING",
             "progress_pct": 5,
             "message": "Inspecting dataset on Kaggle…",
@@ -580,7 +581,7 @@ async def _execute_train_pipeline(
             return
 
         yield {
-            "type": "acp_status",
+            "type": "job_progress",
             "status": "PROCESSING",
             "progress_pct": 10,
             "message": "Dataset found — downloading and preprocessing…",
@@ -605,7 +606,7 @@ async def _execute_train_pipeline(
             ),
         }
         yield {
-            "type": "acp_status",
+            "type": "job_progress",
             "status": "PROCESSING",
             "progress_pct": 20,
             "message": "Queueing on-chain training job…",
@@ -619,11 +620,12 @@ async def _execute_train_pipeline(
             prepared["target_column"],
             prepared,
             message,
-            auth_fields,
+            ap2_session_id,
+            user_account_id,
         )
         yield {
-            "type": "acp_status",
-            "order_id": job.get("job_id"),
+            "type": "job_progress",
+            "job_id": job.get("job_id"),
             "status": "PROCESSING",
             "progress_pct": 25,
             "message": "Training job queued — worker will execute on-chain batches",
@@ -655,7 +657,8 @@ async def run_agent_chat(
     use_case: str,
     architecture_id: str,
     history: Optional[list[dict[str, str]]] = None,
-    wallet_auth: Optional[dict[str, Any]] = None,
+    ap2_session_id: str = "",
+    user_account_id: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     had_full_selection = bool(use_case.strip() and architecture_id.strip())
     msg = message.strip()
@@ -715,7 +718,7 @@ async def run_agent_chat(
         )
         train_uc = resolved_use_case or use_case or "Tabular ML"
         async for event in _execute_train_pipeline(
-            message, train_uc, train_arch, wallet_auth
+            message, train_uc, train_arch, ap2_session_id, user_account_id
         ):
             yield event
         return

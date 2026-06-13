@@ -40,22 +40,6 @@ app.add_middleware(
 )
 
 
-class WalletAuthPayload(BaseModel):
-    user_account_id: str
-    mandate: dict[str, Any]
-    mandate_signature: str
-    allowance_tx_id: str = ""
-    associate_tx_id: str = ""
-    initiation_tx_id: str = ""
-    acp_order_id: str = ""
-
-
-class AuthorizeRequest(BaseModel):
-    wallet_auth: WalletAuthPayload
-    use_case: str = ""
-    intent: str = ""
-
-
 class ChatRequest(BaseModel):
     message: str
     use_case: str = ""
@@ -63,7 +47,25 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     history: Optional[list[dict[str, str]]] = None
     user_account_id: str = ""
-    wallet_auth: Optional[WalletAuthPayload] = None
+    ap2_session_id: str = ""
+
+
+class CreateAp2SessionRequest(BaseModel):
+    thread_id: str
+    user_account_id: str
+    intent: str = "POCU chat and on-chain ML training"
+
+
+class ActivateAp2SessionRequest(BaseModel):
+    user_account_id: str
+    allowance_tx_id: str = ""
+
+
+class SettleAp2Request(BaseModel):
+    amount_tinybars: int
+    reason: str
+    batch_index: Optional[int] = None
+    job_id: Optional[str] = None
 
 
 class CreateThreadRequest(BaseModel):
@@ -89,10 +91,10 @@ def _apply_sse_to_assistant(assistant: dict[str, Any], event: dict[str, Any]) ->
         assistant["job"] = event["job"]
     elif etype == "job_status" and event.get("job"):
         assistant["job"] = event["job"]
-    elif etype == "acp_status":
-        assistant["acp_status"] = {
+    elif etype == "job_progress":
+        assistant["job_progress"] = {
             k: event.get(k)
-            for k in ("order_id", "status", "progress_pct", "message")
+            for k in ("job_id", "status", "progress_pct", "message")
             if event.get(k) is not None
         }
 
@@ -107,8 +109,8 @@ def _assistant_metadata(assistant: dict[str, Any]) -> dict[str, Any]:
         meta["datasets"] = assistant["datasets"]
     if assistant.get("job"):
         meta["job"] = assistant["job"]
-    if assistant.get("acp_status"):
-        meta["acp_status"] = assistant["acp_status"]
+    if assistant.get("job_progress"):
+        meta["job_progress"] = assistant["job_progress"]
     return meta
 
 
@@ -173,39 +175,73 @@ def job_detail(job_id: str, user_account_id: str = "") -> dict[str, Any]:
     return job
 
 
-@app.post("/authorize")
-async def authorize_training(req: AuthorizeRequest) -> dict[str, Any]:
-    from hedera_auth import validate_wallet_auth
-    from ap2_mandate import mandate_hash
-    import uuid
+@app.post("/ap2/sessions")
+async def create_ap2_session(req: CreateAp2SessionRequest) -> dict[str, Any]:
+    from pocu_ap2.session import create_session
 
-    payload = req.wallet_auth.model_dump()
-    auth = await asyncio.to_thread(validate_wallet_auth, payload)
+    if not req.user_account_id.strip():
+        raise HTTPException(400, "user_account_id is required")
+    if not req.thread_id.strip():
+        raise HTTPException(400, "thread_id is required")
+    try:
+        return await asyncio.to_thread(
+            create_session,
+            thread_id=req.thread_id.strip(),
+            user_account_id=req.user_account_id.strip(),
+            intent=req.intent.strip() or "POCU chat and on-chain ML training",
+        )
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
 
-    order_id = str(uuid.uuid4())
-    intent = req.intent or req.use_case or "train_ml_model"
-    topic_id = _load_hcs_topic_id()
-    if topic_id:
-        try:
-            await asyncio.to_thread(
-                _publish_acp_order,
-                topic_id,
-                order_id,
-                intent,
-                auth["ap2_mandate_hash"],
-                auth["user_account_id"],
-            )
-        except Exception as e:
-            print(f"[acp] order publish warning (auth still ok): {e}")
 
-    return {
-        "ok": True,
-        "order_id": order_id,
-        "user_account_id": auth["user_account_id"],
-        "ap2_mandate_hash": auth["ap2_mandate_hash"],
-        "allowance_hbar": auth["allowance_hbar"],
-        **auth,
-    }
+@app.post("/ap2/sessions/{session_id}/activate")
+async def activate_ap2_session(session_id: str, req: ActivateAp2SessionRequest) -> dict[str, Any]:
+    from pocu_ap2.session import activate_session
+
+    if not req.user_account_id.strip():
+        raise HTTPException(400, "user_account_id is required")
+    try:
+        return await asyncio.to_thread(
+            activate_session,
+            session_id,
+            req.user_account_id.strip(),
+            req.allowance_tx_id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+
+
+@app.get("/ap2/sessions/{session_id}")
+def get_ap2_session(session_id: str, user_account_id: str = "") -> dict[str, Any]:
+    from pocu_ap2.session import get_session
+
+    row = get_session(session_id, user_account_id.strip())
+    if not row:
+        raise HTTPException(404, "AP2 session not found")
+    safe = {k: v for k, v in row.items() if not k.endswith("_sdjwt")}
+    return safe
+
+
+@app.post("/ap2/sessions/{session_id}/settle")
+async def settle_ap2_session(session_id: str, req: SettleAp2Request) -> dict[str, Any]:
+    from pocu_ap2.session import settle_payment
+
+    if req.amount_tinybars <= 0:
+        raise HTTPException(400, "amount_tinybars must be positive")
+    try:
+        return await asyncio.to_thread(
+            settle_payment,
+            session_id,
+            req.amount_tinybars,
+            req.reason,
+            "",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
 
 
 @app.post("/jobs/{job_id}/mint-model-nft")
@@ -235,54 +271,6 @@ async def mint_model_nft_endpoint(job_id: str) -> dict[str, Any]:
         ).eq("id", job_id).execute()
         print(f"[hts] mint failed job={job_id}: {e}")
         raise HTTPException(500, str(e)) from e
-
-
-def _load_hcs_topic_id() -> str:
-    path = Path(__file__).resolve().parent.parent / "deployments" / "testnet.json"
-    if path.is_file():
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("hcsTopicId"):
-            return data["hcsTopicId"]
-    hcs = Path(__file__).resolve().parent.parent / "deployments" / "hcs.json"
-    if hcs.is_file():
-        return json.loads(hcs.read_text(encoding="utf-8")).get("topicId", "")
-    return os.getenv("HCS_TOPIC_ID", "")
-
-
-def _publish_acp_order(
-    topic_id: str,
-    order_id: str,
-    intent: str,
-    mandate_hash_val: str,
-    user_account: str,
-) -> None:
-    from hiero_sdk_python import TopicId, TopicMessageSubmitTransaction
-    from agent_core import _hedera_client
-
-    if not _hedera_client:
-        raise RuntimeError("Hedera client not initialized for ACP publish")
-
-    body = json.dumps(
-        {
-            "type": "ACP_ORDER",
-            "order_id": order_id,
-            "service": "train_ml_model",
-            "intent": intent,
-            "budget_hbar": 200,
-            "ap2_mandate_hash": mandate_hash_val,
-            "status": "PENDING",
-            "user_account": user_account,
-        }
-    )
-    receipt = (
-        TopicMessageSubmitTransaction()
-        .set_topic_id(TopicId.from_string(topic_id))
-        .set_message(body)
-        .execute(_hedera_client)
-    )
-    print(
-        f"[acp] order created order_id={order_id} topic={topic_id} status={receipt.status}"
-    )
 
 
 @app.get("/threads")
@@ -337,13 +325,21 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         architecture_id = req.architecture_id.strip()
         history: list[dict[str, str]] = list(req.history or [])
         user_account_id = (req.user_account_id or "").strip()
-        if not user_account_id and req.wallet_auth:
-            user_account_id = (req.wallet_auth.user_account_id or "").strip()
+        ap2_session_id = (req.ap2_session_id or "").strip()
         if not user_account_id:
             yield {"type": "text", "content": "Error: Connect your wallet before chatting."}
             return
+        if not ap2_session_id:
+            yield {
+                "type": "text",
+                "content": "Error: Complete AP2 session authorization before chatting.",
+            }
+            return
 
         try:
+            from pocu_ap2.session import validate_active_session
+
+            await asyncio.to_thread(validate_active_session, ap2_session_id, user_account_id)
             yield {"type": "status", "message": "Agent received your message…"}
 
             if not thread_id:
@@ -384,15 +380,15 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 history = db_history
 
             assistant: dict[str, Any] = {"text": ""}
-
-            wallet_auth = req.wallet_auth.model_dump() if req.wallet_auth else None
+            had_error = False
 
             async for event in run_agent_chat(
                 req.message,
                 use_case,
                 architecture_id,
                 history,
-                wallet_auth,
+                ap2_session_id,
+                user_account_id,
             ):
                 if event.get("type") == "selection":
                     sel_uc = event.get("use_case")
@@ -406,6 +402,8 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                             architecture_id=sel_arch,
                         )
                 _apply_sse_to_assistant(assistant, event)
+                if event.get("type") == "text" and str(event.get("content", "")).startswith("Error:"):
+                    had_error = True
                 yield event
 
             meta = _assistant_metadata(assistant)
@@ -416,6 +414,18 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 assistant.get("text") or "",
                 meta if meta else None,
             )
+
+            if not had_error and (assistant.get("text") or assistant.get("job") or assistant.get("dataset")):
+                from pocu_ap2.session import settle_chat_turn
+
+                settlement = await asyncio.to_thread(
+                    settle_chat_turn, ap2_session_id, user_account_id
+                )
+                yield {
+                    "type": "ap2_settlement",
+                    "amount_hbar": settlement.get("amount_hbar"),
+                    "hedera_tx_id": settlement.get("hedera_tx_id"),
+                }
         except Exception as e:
             err = str(e)
             if any(

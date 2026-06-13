@@ -48,8 +48,7 @@ export interface TrainingJobRow {
   train_epochs?: number;
   logs?: string;
   user_account_id?: string;
-  ap2_mandate_hash?: string;
-  acp_order_id?: string;
+  ap2_session_id?: string;
   allowance_hbar?: number;
   created_at?: string;
   updated_at?: string;
@@ -363,8 +362,7 @@ export async function runTrainingJob(job: TrainingJobRow, repoRoot: string): Pro
       PREPARED_META_PATH: preparedMetaPath,
     };
     if (job.user_account_id) env.USER_ACCOUNT_ID = job.user_account_id;
-    if (job.ap2_mandate_hash) env.AP2_MANDATE_HASH = job.ap2_mandate_hash;
-    if (job.acp_order_id) env.ACP_ORDER_ID = job.acp_order_id;
+    if (job.ap2_session_id) env.AP2_SESSION_ID = job.ap2_session_id;
     if (job.allowance_hbar != null) env.ALLOWANCE_HBAR = String(job.allowance_hbar);
     if (process.env.ACCOUNT_ID) env.AGENT_ACCOUNT_ID = process.env.ACCOUNT_ID;
     if (job.input_dim != null) env.INPUT_DIM = String(job.input_dim);
@@ -425,8 +423,6 @@ export async function runTrainingJob(job: TrainingJobRow, repoRoot: string): Pro
     }
 
     const modelUrl = await uploadManifestToSupabase(sb, job.id, manifestPath);
-    const mppSpent = manifest.mppTotalSpentHbar ?? null;
-
     await sb
       .from("training_jobs")
       .update({
@@ -437,9 +433,6 @@ export async function runTrainingJob(job: TrainingJobRow, repoRoot: string): Pro
         weights_hash: manifest.weightsHash ?? null,
         hcs_topic_id: manifest.hcsTopicId ?? null,
         ipfs_uri: manifest.ipfsUri ?? null,
-        total_spent_hbar: mppSpent,
-        acp_status: "PROCESSING",
-        acp_progress_pct: 90,
       })
       .eq("id", job.id);
 

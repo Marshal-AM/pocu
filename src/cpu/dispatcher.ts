@@ -39,8 +39,7 @@ import { DispatchStats } from "../dispatch-stats";
 import { hydrateBatchReceipt, hydrateSingleReceipt } from "./hydrate";
 import { isPinataEnabled } from "../ipfs/pinata";
 import { sendBatchExecute } from "./batch-send";
-import { publishAcpStatus } from "../protocols/acp";
-import { reimburseGasReceipt, type MppContext } from "../protocols/mpp";
+import { settleBatchViaAgent } from "../protocols/ap2-settle";
 
 async function maybePublishHcs(
   topicId: string,
@@ -99,8 +98,8 @@ export interface DispatcherContext {
   signer: Signer;
   topicId: string;
   log?: StepLogger;
-  mppContext?: MppContext;
-  acpOrderId?: string;
+  ap2SessionId?: string;
+  jobId?: string;
   totalBatches?: number;
 }
 
@@ -390,28 +389,14 @@ async function dispatchBatch(
     applyOptimizerAliases(program, inst, store);
   }
 
-  await reimburseGasReceipt({
-    ctx: ctx.mppContext,
-    batchIndex,
-    receipt,
-    log: ctx.log,
-  });
-
-  if (ctx.acpOrderId && ctx.totalBatches && ctx.totalBatches > 0) {
-    const progressPct = Math.min(
-      99,
-      Math.round(((batchIndex + 1) / ctx.totalBatches) * 100)
-    );
-    await publishAcpStatus(
-      ctx.topicId,
-      {
-        order_id: ctx.acpOrderId,
-        status: "PROCESSING",
-        progress_pct: progressPct,
-        message: `Batch ${batchIndex + 1}/${ctx.totalBatches} executed`,
-      },
-      ctx.log
-    );
+  if (ctx.ap2SessionId) {
+    await settleBatchViaAgent({
+      sessionId: ctx.ap2SessionId,
+      batchIndex,
+      receipt,
+      jobId: ctx.jobId,
+      log: ctx.log,
+    });
   }
 }
 
@@ -501,12 +486,13 @@ export async function dispatchProgram(
         coreContract: (coreKey: string) => coreContract(ctx, coreKey),
         stats,
         hydrateOptions: { log: ctx.log },
-        onGasReceipt: ctx.mppContext
+        onGasReceipt: ctx.ap2SessionId
           ? async (batchIndex: number, receipt: { gasUsed: bigint; gasPrice?: bigint | null }) => {
-              await reimburseGasReceipt({
-                ctx: ctx.mppContext,
+              await settleBatchViaAgent({
+                sessionId: ctx.ap2SessionId!,
                 batchIndex,
                 receipt,
+                jobId: ctx.jobId,
                 log: ctx.log,
               });
             }
