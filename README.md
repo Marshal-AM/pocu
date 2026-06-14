@@ -29,9 +29,9 @@
 | `OptimizerCore` | Hedera testnet | [`0x4B3C6aDCd6F6F5439c3Ead8C2DBAeCf8A1B089E6`](https://hashscan.io/testnet/contract/0x4B3C6aDCd6F6F5439c3Ead8C2DBAeCf8A1B089E6) |
 | `AggregationCore` | Hedera testnet | [`0xec0f13F9b5ceb6c8E4EbD7E58dc43B3b34FdA348`](https://hashscan.io/testnet/contract/0xec0f13F9b5ceb6c8E4EbD7E58dc43B3b34FdA348) |
 | POCU Model NFT (HTS) | Hedera testnet | [`0.0.9211401`](https://hashscan.io/testnet/token/0.0.9211401) |
-| Shared HCS topic (ACP) | Hedera testnet | [`0.0.9191580`](https://hashscan.io/testnet/topic/0.0.9191580) |
+| Shared HCS topic | Hedera testnet | [`0.0.9191580`](https://hashscan.io/testnet/topic/0.0.9191580) |
 
-> **Note:** Each training run also creates a **dedicated HCS audit topic** (stored on the job row as `hcs_topic_id`). The shared topic above is used for ACP order visibility. Agent operator account: `0.0.6111100` (`ACCOUNT_ID` in `.env`).
+> **Note:** Each training run also creates a **dedicated HCS audit topic** (stored on the job row as `hcs_topic_id`). The shared topic above is a legacy deployment artifact; per-run topics carry the primary audit trail.
 
 ---
 
@@ -46,14 +46,13 @@
    - [4.3 Conversational Orchestration](#43-conversational-orchestration)
    - [4.4 Tooling & Capabilities](#44-tooling--capabilities)
    - [4.5 LLM & Context Management](#45-llm--context-management)
-   - [4.6 Wallet-Authorized Commerce Flow](#46-wallet-authorized-commerce-flow)
-   - [4.7 Deployment Topology](#47-deployment-topology)
-5. [Interoperability Protocols](#5-interoperability-protocols)
-   - [5.1 Overview](#51-overview)
-   - [5.2 AP2 — Agent Payment Mandate](#52-ap2--agent-payment-mandate)
-   - [5.3 MPP — Mandate Payment Protocol](#53-mpp--mandate-payment-protocol)
-   - [5.4 ACP — Agent Commerce Protocol](#54-acp--agent-commerce-protocol)
-   - [5.5 End-to-End Protocol Flow](#55-end-to-end-protocol-flow)
+   - [4.6 AP2 Session Flow (Wallet)](#46-ap2-session-flow-wallet)
+5. [AP2 Payments](#5-ap2-payments-google-agent-payments-protocol)
+   - [5.1 Mandate pair (per chat session)](#51-mandate-pair-per-chat-session)
+   - [5.2 Hedera HBAR extension](#52-hedera-hbar-extension)
+   - [5.3 Charges](#53-charges)
+   - [5.4 Database](#54-database)
+   - [5.5 End-to-end flow](#55-end-to-end-flow)
 6. [Hedera Integrations](#6-hedera-integrations)
    - [6.1 Hedera EVM & Smart Contracts](#61-hedera-evm--smart-contracts)
    - [6.2 HCS — Consensus & Audit Trail](#62-hcs--consensus--audit-trail)
@@ -82,14 +81,14 @@ We are entering an era where AI agents do not merely *answer questions*—they *
 
 The elevator pitch is simple:
 
-> **User speaks → agent finds relevant datasets → preprocesses → queues job → worker runs tensor ops in Solidity → user receives an HTS model NFT with cryptographic proof.**
+> **User speaks → Agent finds relevant datasets → preprocesses → queues job → Runs tensor ops in Solidity → Builds an ML Model on-chain and Mints a HTS model NFT with cryptographic proof.**
 
 This is not "ML with blockchain payments bolted on." This is **ML as ledger execution**—matrix multiplications, activations, loss gradients, and optimizer steps running on Hedera, audited on HCS, committed to a `ModelRegistry`, and delivered as a non-fungible token the user actually owns.
 
 POCU combines three breakthroughs in one stack:
 
-1. **A conversational training coordinator** powered by Groq LLMs and LangChain tool-calling—not a chatbot, but an autonomous ML ops agent.
-2. **POCU-defined interoperability protocols** (AP2, MPP, ACP) that let agents spend user-authorized HBAR safely while publishing an auditable commerce lifecycle on HCS.
+1. **A conversational training coordinator** powered by LLMs and LangChain tool-calling—not a chatbot, but an autonomous ML ops agent.
+2. **Google AP2 agent payments** — open checkout + payment mandate pairs per chat thread, closed mandates per charge, and HIP-745 HBAR allowance settlement — implemented in [`agent/pocu_ap2/`](agent/pocu_ap2/) and documented in [`AP2_INTEGRATION.md`](AP2_INTEGRATION.md). Training lifecycle audit lives on HCS; payments are AP2-only (no separate MPP/ACP layers).
 3. **cpuarc**—an on-chain compute engine: a fixed-point tensor instruction set, five Solidity compute cores, and a batch executor that turns Hedera transactions into verifiable training steps.
 
 ```mermaid
@@ -114,7 +113,7 @@ Three massive gaps intersect in modern AI—and POCU closes all three simultaneo
 
 Machine learning models are black boxes. When a bank deploys a fraud detector, a hospital screens for heart disease, or a telco predicts churn, stakeholders ask: *Where did this model come from? Who trained it? On what data? Can we prove it wasn't tampered with?*
 
-Traditional ML pipelines offer logs at best. POCU offers **ledger-grade provenance**: every training batch emits HCS audit messages; final weights are hashed and committed on-chain; the deliverable is an HTS NFT whose metadata points to immutable proof.
+Traditional ML pipelines offer logs at best. POCU offers **ledger-grade provenance**: every training batch emits HCS audit messages; final weights are hashed and committed on-chain; the deliverable is an ACTUAL ML Model trained on-chain with an HTS NFT whose metadata points to immutable proof.
 
 ### The Access Gap
 
@@ -126,13 +125,13 @@ POCU's agent accepts intents like **"build a fraud detection model"** or **"pred
 
 AI agents that can *think* are useless if they cannot *spend*—safely, transparently, within user-defined budgets. Who pays for on-chain gas? How does the user retain control? How is spend auditable?
 
-POCU answers with three composable protocols layered on Hedera primitives:
+POCU answers with **Google AP2** plus native Hedera primitives (HIP-745 allowances, HCS audit, HTS deliverables):
 
 | Gap | Pain | POCU Answer |
 |-----|------|-------------|
 | **Trust** | Black-box models, no provenance | HCS audit + on-chain hashes + NFT deliverable |
-| **Access** | ML requires pipelines, infra, expertise | Conversational agent + Kaggle discovery |
-| **Agent commerce** | Agents cannot safely spend user funds at scale | AP2 mandate + HBAR allowance + MPP + ACP order lifecycle |
+| **Access** | ML requires pipelines, infra, expertise | Conversational agent + Autonomous Dataset discovery |
+| **Agent commerce** | Agents cannot safely spend user funds at scale | AP2 mandate + HBAR allowance |
 
 The result: a user connects HashPack, signs a budget mandate, chats with an agent, and receives a verifiable on-chain model—all without surrendering custody of their wallet or blind-trusting an opaque API.
 
@@ -146,7 +145,7 @@ POCU is a **three-service platform** orchestrated through Supabase and Hedera te
 
 | Service | Location | Role |
 |---------|----------|------|
-| **Web UI** | [`web/`](web/) | Next.js chat interface, HashPack wallet gate, structured SSE cards (dataset picks, job links, ACP progress) |
+| **Web UI** | [`web/`](web/) | Next.js chat interface, HashPack wallet gate, structured SSE cards (dataset picks, job progress, AP2 settlement) |
 | **Agent** | [`agent/`](agent/) | FastAPI + LangChain + Groq coordinator; job creation; HTS mint callback |
 | **Job Worker** | [`src/jobs/worker.ts`](src/jobs/worker.ts) | Polls Supabase for pending jobs; spawns Hardhat training; uploads manifest; triggers NFT mint |
 
@@ -170,10 +169,10 @@ Natural language intent
 ModelRegistry.commitCpuModel() — on-chain hash commitment
   → Optional Pinata IPFS manifest pin
   → agent/hts_mint.py — HTS NFT mint + transfer to user wallet
-  → ACP_STATUS: COMPLETE on HCS
+  → TRAINING_COMPLETE on per-run HCS topic
 ```
 
-The user ends with an **HTS model NFT**—a tangible, transferable artifact representing their trained model, not a database row.
+The user ends with an Actual **ML Model manifest** and an **HTS model NFT**—a tangible, transferable artifact representing their trained model, not a database row.
 
 ### Why Hedera
 
@@ -194,11 +193,11 @@ The user ends with an **HTS model NFT**—a tangible, transferable artifact repr
 
 ### 4.1 Vision & Impact
 
-The POCU agent is **the missing UX layer for autonomous on-chain compute**. It is not a chatbot that explains ML—it is a **training coordinator** that closes the entire loop from natural-language intent to HTS model NFT.
+The POCU agent is **the missing UX layer for autonomous on-chain compute**. It is not a chatbot that explains ML—it is a **training coordinator** that closes the entire loop from natural-language intent to building a FULL ML Model.
 
 **Why this matters:**
 
-- **Democratizes ML** — Domain experts describe goals in plain English; the agent handles Kaggle search, preprocessing, architecture matching, and job queueing.
+- **Democratizes ML** — Domain experts describe goals in plain English; the agent handles Dataset search, preprocessing, architecture matching, and job queueing.
 - **Enables auditable AI commerce** — Every chat session gets a real AP2 mandate pair, budget cap, and payment receipts on Hedera.
 - **Proves agents can spend safely** — AP2 mandates and HBAR allowances let autonomous agents reimburse gas from pre-approved budgets without custodial risk.
 - **Makes ledger compute usable** — Without the agent, cpuarc is a low-level tensor engine. With it, anyone can say *"train a fraud model on this dataset"* and get an on-chain job.
@@ -240,7 +239,8 @@ flowchart TB
 
   subgraph api [Agent API Layer — main.py]
     ChatRoute["POST /chat SSE"]
-    AuthRoute["POST /authorize"]
+    Ap2Route["POST /ap2/sessions"]
+    Ap2Activate["POST /ap2/sessions/id/activate"]
     JobsRoute["GET /jobs"]
     ThreadsRoute["GET/POST /threads"]
     MintRoute["POST /jobs/id/mint-model-nft"]
@@ -260,8 +260,8 @@ flowchart TB
   end
 
   subgraph tools [Tooling]
-    MLTools[Custom ML Tools — tools_impl.py]
     HederaKit[Hedera Agent Kit Tools]
+    MLTools[Custom ML Tools — tools_impl.py]
   end
 
   subgraph mlops [ML Ops Integrations]
@@ -276,20 +276,26 @@ flowchart TB
   end
 
   subgraph hedera_agent [Hedera Agent Side]
-    HederaAuth[hedera_auth.py AP2 and allowance]
-    HtsMint[hts_mint.py HTS mint and ACP COMPLETE]
-    AcpPublish[ACP_ORDER on HCS]
+    PocuAp2[pocu_ap2 AP2 mandates and settlement]
+    HederaAuth[hedera_auth.py allowance verify]
+    HtsMint[hts_mint.py HTS mint and transfer]
   end
 
   subgraph worker_ext [External Worker]
     JobWorker[TS Job Worker worker.ts]
     OnChainTrain[scripts/train.ts cpuarc]
+    Ap2Settle[ap2-settle.ts batch gas]
   end
 
   User --> WebUI
   HashPack --> WebUI
   WebUI -->|SSE chat events| ChatRoute
-  WebUI --> AuthRoute
+  WebUI --> Ap2Route
+  WebUI --> Ap2Activate
+  Ap2Route --> PocuAp2
+  Ap2Activate --> HederaAuth
+  PocuAp2 --> SupabaseDB
+  HederaAuth --> SupabaseDB
   ChatRoute --> Router
   Router --> StaticWelcome
   Router --> InferSelection
@@ -298,35 +304,161 @@ flowchart TB
   InferSelection --> Groq
   ToolLoop --> Groq
   Groq --> ContextMgr
-  ToolLoop --> MLTools
   ToolLoop --> HederaKit
+  ToolLoop --> MLTools
   MLTools --> Kaggle
   MLTools --> Preprocess
   MLTools --> ArchCatalog
   MLTools --> SupabaseDB
   MLTools --> SupabaseStorage
   TrainPipeline --> MLTools
-  AuthRoute --> HederaAuth
-  HederaAuth --> AcpPublish
-  HederaAuth --> SupabaseDB
   JobWorker -->|poll pending| SupabaseDB
   JobWorker -->|download prepared data| SupabaseStorage
   JobWorker --> OnChainTrain
+  OnChainTrain --> Ap2Settle
+  Ap2Settle --> PocuAp2
   JobWorker --> MintRoute
   MintRoute --> HtsMint
-  ChatRoute -->|selection dataset job acp_status tokens| WebUI
+  ChatRoute -->|selection dataset job job_progress ap2_settlement| WebUI
 ```
 
-*End-to-end agent architecture — conversational orchestration, dual tool stacks (custom ML + Hedera Agent Kit), Supabase job queue, and worker-triggered on-chain training.*
+*End-to-end agent architecture — conversational orchestration, Hedera Agent Kit + custom ML tools, AP2 settlement, Supabase job queue, and worker-triggered on-chain training.*
+
+### 4.3 Conversational Orchestration
+
+Every chat message enters [`agent/agent_core.py`](agent/agent_core.py) via `run_agent_chat()` → `_run_agent_chat_inner()`, but only after [`agent/main.py`](agent/main.py) validates an active AP2 session (`validate_active_session`). The agent does not jump straight to open-ended LLM chat—it runs a **deterministic pre-router** first, then falls back to a LangChain tool loop when needed.
+
+#### End-to-end capability flow
+
+```mermaid
+flowchart TD
+  Wallet[HashPack + AP2 session active] --> Chat[POST /chat SSE]
+  Chat --> Router{Pre-router}
+  Router -->|greeting| Welcome[Static welcome]
+  Router -->|missing use_case or arch| Infer["_infer_selection via Groq JSON"]
+  Infer --> SelectionSSE[selection SSE event]
+  Router -->|selection question| Answer["_answer_selection_question"]
+  Router -->|dataset ref + train keywords| Pipeline["_execute_train_pipeline"]
+  Router -->|alternative datasets| AltSearch[Kaggle list datasets event]
+  Router -->|ML intent + inferred selection| AutoSearch[auto Kaggle + dataset event]
+  Router -->|else| ToolLoop[LangChain tool loop max 8 steps]
+  Pipeline --> Inspect[inspect_kaggle_dataset]
+  Inspect --> Preprocess[download_and_prepare]
+  Preprocess --> QueueJob[trigger_training_job]
+  ToolLoop --> AllTools[Hedera Kit + custom ML tools]
+  QueueJob --> Worker[worker.ts claims job]
+  Worker --> Train[train.ts cpuarc on-chain]
+  Train --> AP2Batch[settleBatchViaAgent per batch]
+  Train --> AwaitingNFT[status awaiting_nft]
+  AwaitingNFT --> Mint["POST /jobs/id/mint-model-nft"]
+  Mint --> NFT[HTS NFT transfer to user]
+```
+
+#### Stage 1 — Intent and selection
+
+The pre-router classifies each message before invoking tools:
+
+| Branch | Trigger | Handler | Output |
+|--------|---------|---------|--------|
+| Greeting | `_is_casual_greeting()` | Static welcome text | `text` SSE |
+| Missing use case / architecture | `_needs_inference()` | `_resolve_selection()` → `_infer_selection()` | `selection` SSE with use case + `architecture_id` |
+| Selection question | `_is_selection_question()` | `_answer_selection_question()` | `text` SSE explaining current pick |
+| Train pipeline | `_is_train_pipeline_request()` — dataset ref + train keywords | `_execute_train_pipeline()` | Deterministic inspect → preprocess → queue |
+| Alternative datasets | `_wants_alternative_datasets()` | Kaggle search | `datasets` SSE |
+| Auto-search | `_should_auto_search()` + ML intent patterns | Kaggle best pick | `dataset` + follow-up `text` |
+| General | Otherwise | LangChain tool loop (max 8 steps) | Tool calls or `text` |
+
+Users can override inference via the UI picker ([`web/components/agent/SetupPanel.tsx`](web/components/agent/SetupPanel.tsx), [`ArchitecturePicker.tsx`](web/components/agent/ArchitecturePicker.tsx)) by sending `use_case` and `architecture_id` with each chat request.
+
+#### Stage 2 — Architecture matching
+
+Canonical MLP templates live in [`src/cpu/models/architectures.ts`](src/cpu/models/architectures.ts) (`ARCHITECTURE_TEMPLATES`, `getArchitectureById()`, `architectureToSpec()`). The agent reads an exported catalog from [`agent/architectures.json`](agent/architectures.json) (generated by `scripts/export-architectures.ts`).
+
+When `_infer_selection()` runs, Groq returns JSON picking a use case and architecture from the catalog—classification tasks map to cross-entropy architectures, regression to MSE architectures, with `arch-mid-32-16` as the default fallback. `_valid_architecture_id()` rejects unknown IDs. The LLM or user can also call `list_architectures_tool` inside the tool loop.
+
+#### Stage 3 — Dataset discovery
+
+Kaggle integration ([`agent/kaggle_client.py`](agent/kaggle_client.py), [`agent/tools_impl.py`](agent/tools_impl.py)) powers discovery:
+
+- `search_kaggle_datasets` — CSV search with `list_mode` `"best"` or `"all"`
+- `inspect_kaggle_dataset_tool` — file list + **≤500 MB** size guard
+- Auto-search path — `_pick_best_dataset_for_use_case()` ranks candidates and emits a `dataset` SSE card
+
+The deterministic train pipeline (`_execute_train_pipeline`) extracts a dataset ref from the message (e.g. `owner/dataset-name`) and runs inspect → prepare → queue without entering the LLM tool loop.
+
+#### Stage 4 — Preprocessing
+
+`download_and_prepare_dataset` (or the direct `download_and_prepare()` call in the train pipeline) downloads CSVs to `data/kaggle/{jobId}/`, then spawns:
+
+```bash
+hardhat run scripts/preprocess-tabular.ts
+```
+
+Core logic in [`src/preprocess-tabular.ts`](src/preprocess-tabular.ts): auto-detect target column, validate task type against the architecture template, Pearson-correlation feature selection, z-score normalization, fixed-point encoding, and SHA-256 `dataHash`. Output (`prepared.csv` + `meta.json`) uploads to Supabase bucket `job-data` when the job is created. POC defaults: **2 samples**, **1 epoch** (`MAX_TRAIN_SAMPLES=2`).
+
+#### Stage 5 — Job queue and AP2 gates
+
+`trigger_training_job_tool` inserts a `training_jobs` row (`status: pending`) linking `ap2_session_id` and `user_account_id`. Before queueing, the train pipeline:
+
+1. Requires an active AP2 session (HashPack + 200 HBAR allowance)
+2. Validates session via `validate_active_session()`
+3. Checks estimated cost against the session budget via `cost_estimate.exceeds_allowance_cap()`
+
+The worker ([`src/jobs/worker.ts`](src/jobs/worker.ts)) polls Supabase, claims pending jobs, downloads prepared data, and spawns `hardhat run scripts/train.ts --network testnet`.
+
+#### Stage 6 — On-chain training
+
+[`scripts/train.ts`](scripts/train.ts) → [`src/cpu/runner.ts`](src/cpu/runner.ts) executes the cpuarc pipeline:
+
+1. `compileMlpProgram()` — instruction program from MLP spec + samples
+2. `createHcsTopic()` — per-run audit topic
+3. `registerCpuJob()` — job on `CpuJobRegistry`
+4. `dispatchProgram()` — batched EVM execution via [`src/cpu/dispatcher.ts`](src/cpu/dispatcher.ts)
+
+When `AP2_SESSION_ID` is set (worker passes it from the job row), each batch calls [`settleBatchViaAgent()`](src/protocols/ap2-settle.ts) → `POST /ap2/sessions/{id}/settle` with actual EVM gas converted to HBAR. On success the worker sets job status to `awaiting_nft` with manifest metadata.
+
+#### Stage 7 — HTS model NFT deliverable
+
+After on-chain training completes, the worker calls `POST /jobs/{id}/mint-model-nft` ([`agent/hts_mint.py`](agent/hts_mint.py)):
+
+1. `build_nft_metadata_bytes()` — compact metadata (≤100 bytes): IPFS URI or `{job, weights}` JSON
+2. `TokenMintTransaction` on the POCU Model NFT collection (`MODEL_NFT_TOKEN_ID`)
+3. NFT transfer to the user's `user_account_id`
+4. Optional `TRAINING_COMPLETE` HCS message on the job's `hcs_topic_id`
+5. Job row updated to `status: completed` with `model_nft_serial`
+
+**Prerequisite:** the user must associate the MODEL NFT token in HashPack ([`web/lib/wallet/ap2-session.ts`](web/lib/wallet/ap2-session.ts)) before training—separate from AP2 session setup.
+
+Each assistant chat turn additionally runs `settle_chat_turn()` (0.1 HBAR) after a successful reply, emitting an `ap2_settlement` SSE event to the UI.
 
 ### 4.4 Tooling & Capabilities
 
-The agent wields **two complementary tool stacks**—custom ML operations and native Hedera ledger tools.
+The agent wields **two complementary tool stacks**—native Hedera ledger tools exposed to the LLM, plus custom ML operations that drive the training pipeline. 
+
+#### Hedera Agent Kit
+
+Loaded first in [`agent/agent_core.py`](agent/agent_core.py) via `HederaLangchainToolkit` on Hedera testnet in **AUTONOMOUS** mode:
+
+| Plugin | Capability |
+|--------|------------|
+| `core_account_query_plugin` | Account balance and info queries |
+| `core_consensus_plugin` | HCS message submission |
+| `core_token_plugin` | HTS token operations |
+| `core_token_query_plugin` | Token balance and metadata queries |
+
+Agent Kit tools are bound into the LangChain loop as `HEDERA_TOOLS` and combined with custom tools as `ALL_TOOLS = CUSTOM_TOOLS + HEDERA_TOOLS`. The system prompt instructs the LLM to check operator balance before training and submit HCS audit messages when appropriate. Requires `ACCOUNT_ID` + `PRIVATE_KEY`
+
+**Direct SDK paths**
+
+| Operation | File |
+|-----------|------|
+| AP2 HIP-745 settlement | [`agent/pocu_ap2/settlement.py`](agent/pocu_ap2/settlement.py) |
+| Allowance verification | [`agent/hedera_auth.py`](agent/hedera_auth.py) |
+| HTS model NFT mint + transfer | [`agent/hts_mint.py`](agent/hts_mint.py) |
 
 #### Custom ML Tools
 
-Implemented in [`agent/tools_impl.py`](agent/tools_impl.py) as LangChain `@tool` decorators:
-
+Implemented in [`agent/tools_impl.py`](agent/tools_impl.py) as LangChain `@tool` decorators—the **primary training path**, also invoked deterministically by `_execute_train_pipeline()`
 | Tool | Role |
 |------|------|
 | `list_architectures_tool` | Returns MLP catalog from `architectures.json` |
@@ -336,33 +468,37 @@ Implemented in [`agent/tools_impl.py`](agent/tools_impl.py) as LangChain `@tool`
 | `trigger_training_job_tool` | Insert Supabase `training_jobs` row + upload to storage |
 | `get_training_job` | Poll job status and logs |
 
-#### Hedera Agent Kit
+### 4.5 LLM & Context Management
 
-Loaded in [`agent/agent_core.py`](agent/agent_core.py) via `HederaLangchainToolkit` on Hedera testnet in **AUTONOMOUS** mode:
+The agent uses **Groq** (`llama-3.3-70b-versatile` via `GROQ_MODEL` env) through LangChain's `ChatGroq` wrapper (`build_llm()` in [`agent/agent_core.py`](agent/agent_core.py)).
 
-| Plugin | Capability |
-|--------|------------|
-| `core_account_query_plugin` | Account balance and info queries |
-| `core_consensus_plugin` | HCS message submission |
-| `core_token_plugin` | HTS token operations |
-| `core_token_query_plugin` | Token balance and metadata queries |
+| Concern | Implementation |
+|---------|----------------|
+| Tool binding | `build_llm().bind_tools(ALL_TOOLS)` — Hedera Kit + custom ML tools |
+| System prompt | On-chain ML coordinator instructions in `SYSTEM_PROMPT` |
+| History trimming | [`agent/llm_context.py`](agent/llm_context.py) — `trim_history()` before LLM calls |
+| Context pruning | `prune_messages()` compacts tool-call chains between steps |
+| Max tool steps | 8 iterations in the LangChain loop |
+| Inference calls | `_infer_selection()` and `_pick_best_dataset_for_use_case()` use standalone LLM JSON output |
 
-The Hedera Agent Kit is the **bridge between conversational AI and Hedera state**—letting the agent check operator balance before training, submit HCS audit messages, and interact with tokens natively alongside custom ML tools. Requires `ACCOUNT_ID` + `PRIVATE_KEY`; gracefully degrades if Agent Kit initialization fails.
+After a successful assistant reply, [`agent/main.py`](agent/main.py) calls `settle_chat_turn()` from [`agent/pocu_ap2/session.py`](agent/pocu_ap2/session.py), which creates a closed payment mandate, executes the HIP-745 transfer (0.1 HBAR), stores a payment receipt, and streams an `ap2_settlement` SSE event to the web UI.
 
 ### 4.6 AP2 Session Flow (Wallet)
 
 Each **new chat** requires an AP2 session before the composer is enabled ([`web/components/Ap2SetupGate.tsx`](web/components/Ap2SetupGate.tsx), [`web/lib/wallet/ap2-session.ts`](web/lib/wallet/ap2-session.ts)):
 
-1. **Create session** — Agent builds real open checkout + open payment SD-JWTs via the [Google AP2 Python SDK](https://github.com/google-agentic-commerce/AP2) (`agent/pocu_ap2/`)
-2. **Approve HBAR allowance** — HashPack `AccountAllowanceApproveTransaction` (default 200 HBAR)
-3. **Activate** — `POST /ap2/sessions/{id}/activate`; [`agent/hedera_auth.py`](agent/hedera_auth.py) verifies allowance on the mirror node
+1. **Gate** — `Ap2SetupGate` blocks the message composer until session status is `active`
+2. **Create session** — `POST /ap2/sessions` with `thread_id` and `user_account_id`; [`build_open_mandates()`](agent/pocu_ap2/mandates.py) produces open checkout + open payment SD-JWTs stored in Supabase; UI receives merchant summary, budget cap, and payment instrument details
+3. **Approve HBAR allowance** — HashPack `AccountAllowanceApproveTransaction` (default **200 HBAR** from [`agent/pocu_ap2/config.py`](agent/pocu_ap2/config.py))
+4. **Activate** — `POST /ap2/sessions/{id}/activate`; [`agent/hedera_auth.py`](agent/hedera_auth.py) verifies allowance on the mirror node and marks session `active`
+5. **Optional NFT associate** — associate MODEL NFT token (HTS requirement, separate from AP2)
+6. **Chat** — `POST /chat` validates active session, runs pre-router or tool loop, streams SSE events
+7. **Settlement** — see charge table in [§5.3](#53-charges)
 
-Optional before training: **associate MODEL NFT token** (HTS requirement, separate from AP2).
+**Settlement paths:**
 
-Settlement:
-
-- **Each agent reply** → 0.1 HBAR via closed payment mandate + HIP-745 transfer + payment receipt
-- **Each training batch** → actual EVM gas cost, settled by [`src/protocols/ap2-settle.ts`](src/protocols/ap2-settle.ts) calling the agent
+- **Each agent reply** → `settle_chat_turn()` → 0.1 HBAR via closed payment mandate + HIP-745 transfer + payment receipt JWT
+- **Each training batch** → worker calls [`settleBatchViaAgent()`](src/protocols/ap2-settle.ts) → `POST /ap2/sessions/{id}/settle` with `reason: training_batch_{n}` and actual EVM gas in tinybars
 
 See [`AP2_INTEGRATION.md`](AP2_INTEGRATION.md) for SDK install (`ap2 @ git+https://github.com/google-agentic-commerce/AP2.git@main`) and Hedera payment-instrument extension details.
 
@@ -370,7 +506,7 @@ See [`AP2_INTEGRATION.md`](AP2_INTEGRATION.md) for SDK install (`ap2 @ git+https
 
 ## 5. AP2 Payments (Google Agent Payments Protocol)
 
-POCU uses the **real AP2 SDK** — not custom JSON mandates. The adapter lives in [`agent/pocu_ap2/`](agent/pocu_ap2/) and installs the upstream package from GitHub (see [`agent/requirements.txt`](agent/requirements.txt)).
+POCU uses the **[Google AP2 SDK](https://github.com/google-agentic-commerce/AP2)** as its sole agent-commerce protocol. The POCU adapter lives in [`agent/pocu_ap2/`](agent/pocu_ap2/) and installs the upstream package from GitHub (see [`agent/requirements.txt`](agent/requirements.txt)).
 
 ### 5.1 Mandate pair (per chat session)
 
@@ -381,7 +517,7 @@ POCU uses the **real AP2 SDK** — not custom JSON mandates. The adapter lives i
 | Closed payment mandate | One per charge (chat turn or training batch) |
 | Payment receipt | JWT bound to closed mandate + Hedera tx id |
 
-Trusted-surface keys sign open mandates after UI consent; the agent signing key (`cnf.jwk`) signs closed payments.
+[`build_open_mandates()`](agent/pocu_ap2/mandates.py) constructs the open mandate pair; trusted-surface keys sign **open** mandates after UI consent, and the agent signing key (`cnf.jwk`) signs **closed** payments and receipts.
 
 ### 5.2 Hedera HBAR extension
 
@@ -404,20 +540,35 @@ Run [`scripts/sql/ap2-sessions-migration.sql`](scripts/sql/ap2-sessions-migratio
 sequenceDiagram
   participant User
   participant Web as Next.js
-  participant Agent as Python Agent
-  participant AP2 as AP2 SDK
-  participant Hedera as HIP-745
+  participant Agent as FastAPI Agent
+  participant AP2 as pocu_ap2 + AP2 SDK
+  participant Mirror as Mirror Node
+  participant Hedera as HIP-745 Transfer
+  participant Worker as Job Worker
+  participant DB as Supabase
 
-  User->>Web: New chat
+  User->>Web: New chat thread
   Web->>Agent: POST /ap2/sessions
-  Agent->>AP2: open checkout + payment SD-JWTs
-  User->>Hedera: Approve allowance
+  Agent->>AP2: build_open_mandates SD-JWTs
+  Agent->>DB: insert ap2_sessions pending
+  User->>Hedera: Approve HBAR allowance
   Web->>Agent: POST /ap2/sessions/id/activate
-  User->>Web: Send message
+  Agent->>Mirror: verify_allowance
+  Agent->>DB: status active
+
+  User->>Web: Send chat message
   Web->>Agent: POST /chat
-  Agent->>AP2: closed payment 0.1 HBAR
+  Agent->>Agent: pre-router or tool loop
+  Agent->>AP2: settle_chat_turn closed mandate
+  Agent->>Hedera: allowance transfer 0.1 HBAR
+  Agent->>AP2: payment receipt JWT
+  Agent->>Web: SSE ap2_settlement
+
+  Note over Worker: After job queued
+  Worker->>Agent: POST /ap2/sessions/id/settle per batch
+  Agent->>AP2: closed mandate actual gas
   Agent->>Hedera: allowance transfer
-  Agent->>AP2: payment receipt
+  Agent->>DB: ap2_payment_receipts
 ```
 
 ---
@@ -460,9 +611,9 @@ Eight EVM contracts form the cpuarc training stack (detailed in [§7](#7-on-chai
 | `INSTRUCTION` | Optional per-instruction audit (`CPU_HCS_BATCH_AUDIT=1`) |
 | `PROGRAM_END` | All batches complete |
 | `COMMIT_WEIGHTS` | Final weights hashed and committed |
-| `ACP_ORDER` / `ACP_STATUS` | Agent commerce lifecycle |
+| `TRAINING_COMPLETE` | Posted by agent after HTS NFT mint ([`agent/hts_mint.py`](agent/hts_mint.py)) |
 
-Each training run creates a **fresh HCS topic** via `createHcsTopic()`. The shared topic `0.0.9191580` ([`deployments/hcs.json`](deployments/hcs.json)) is used for ACP order visibility.
+Each training run creates a **fresh HCS topic** via `createHcsTopic()`. The shared topic `0.0.9191580` ([`deployments/hcs.json`](deployments/hcs.json)) is a legacy deployment artifact; per-run topics are primary.
 
 ### 6.3 HTS — Model NFT Deliverables
 
@@ -476,7 +627,7 @@ Each training run creates a **fresh HCS topic** via `createHcsTopic()`. The shar
 |------|------|
 | Collection deploy | [`scripts/deploy-hts-model-collection.ts`](scripts/deploy-hts-model-collection.ts) — "POCU Model NFT" (`MODEL` symbol) |
 | Mint + transfer | [`agent/hts_mint.py`](agent/hts_mint.py) |
-| Wallet associate | [`web/lib/wallet/authorize-training.ts`](web/lib/wallet/authorize-training.ts) |
+| Wallet associate | [`web/lib/wallet/ap2-session.ts`](web/lib/wallet/ap2-session.ts) |
 
 HTS metadata is capped at **100 bytes**—compact encoding with job reference, weights hash prefix, and manifest pointer.
 
@@ -500,9 +651,9 @@ Enable HFS path with `CPU_HFS_CALLDATA=1`.
 
 **What:** Pre-approved HBAR spending authorization from user to agent account.
 
-**Why:** Enables MPP gas reimbursement without repeated wallet popups for every training batch.
+**Why:** Enables AP2 batch settlement via HIP-745 without repeated wallet popups for every training batch.
 
-**Where:** [`web/lib/wallet/authorize-training.ts`](web/lib/wallet/authorize-training.ts)
+**Where:** [`web/lib/wallet/ap2-session.ts`](web/lib/wallet/ap2-session.ts)
 
 ```typescript
 new AccountAllowanceApproveTransaction()
@@ -533,7 +684,7 @@ Default URL: `https://testnet.mirrornode.hedera.com` (`HEDERA_MIRROR_URL` env).
 
 **Why:** Users retain full custody—POCU never holds private keys for user accounts.
 
-**Where:** [`web/lib/wallet/hedera-wallet.ts`](web/lib/wallet/hedera-wallet.ts), [`web/lib/wallet/ap2.ts`](web/lib/wallet/ap2.ts)
+**Where:** [`web/lib/wallet/hedera-wallet.ts`](web/lib/wallet/hedera-wallet.ts), [`web/lib/wallet/ap2-session.ts`](web/lib/wallet/ap2-session.ts)
 
 WalletConnect session metadata:
 
@@ -567,9 +718,9 @@ flowchart TB
     Mirror[mirror.ts TX harvest]
   end
 
-  subgraph protocols [Payment and Commerce]
-    MPP[MPP gas reimbursement]
-    ACP[ACP progress on HCS]
+  subgraph protocols [AP2 Payments]
+    Ap2Settle[ap2-settle.ts batch settlement]
+    AgentAp2[agent pocu_ap2 settle endpoint]
   end
 
   subgraph hedera_services [Hedera Native Services]
@@ -625,8 +776,8 @@ flowchart TB
   TxUtils --> JumboTX
   TxUtils --> SDKTx
   Dispatcher --> HCS
-  Dispatcher --> MPP
-  Dispatcher --> ACP
+  Dispatcher --> Ap2Settle
+  Ap2Settle --> AgentAp2
   TensorEvents --> Hydrate --> TensorStore
   Runner --> ModelReg
   Runner --> IPFS
@@ -753,8 +904,6 @@ Hedera EVM enforces a **128KB calldata limit** per transaction. A single MLP for
 | [`src/cpu/shard-dispatch.ts`](src/cpu/shard-dispatch.ts) | Shard large ops (TRANSPOSE, ADAM) across multiple TXs |
 | [`src/cpu/packed-batch.ts`](src/cpu/packed-batch.ts) | Compact packed batch encoding |
 
-When batches exceed calldata limits, a **fast greedy fallback** dispatches per-sample batches individually.
-
 ### 7.4 Tensor VRAM Protocol (Event-Only State)
 
 Storing full tensor data in contract storage (SSTORE) is prohibitively expensive on any chain. cpuarc's **Tensor VRAM protocol** solves this with a hybrid model:
@@ -772,7 +921,7 @@ This is **verify on-chain, compute in EVM, store bytes off-chain**—the only vi
 
 ### 7.5 Weight Initialization & Ledger Provenance
 
-Training weights are initialized **deterministically** in the compiler, not from live ledger TX ingestion during dispatch.
+Training weights are initialized **deterministically** in the compiler
 
 #### INIT_WEIGHT (compiler)
 
@@ -820,7 +969,7 @@ After training completes, [`src/cpu/runner.ts`](src/cpu/runner.ts) writes a mani
   "weightsHash": "0x…",
   "hcsTopicId": "0.0.…",
   "txHashes": ["0.0.…@…", "…"],
-  "mppTotalSpentHbar": 87.5,
+  "ap2SessionId": "uuid-…",
   "ipfsUri": "ipfs://…"
 }
 ```
@@ -845,8 +994,8 @@ The complete training lifecycle in [`src/cpu/runner.ts`](src/cpu/runner.ts):
 | 2 | `createHcsTopic()` | Fresh per-run HCS audit topic |
 | 3 | `registerCpuJob()` | Job registered on `CpuJobRegistry` |
 | 4 | `dispatchProgram()` | All instruction batches executed on-chain |
-| 4a | Per batch: MPP gas reimbursement | Agent reimbursed from user allowance |
-| 4b | Per batch: ACP progress update | `progress_pct` on HCS |
+| 4a | Per batch: AP2 settlement | `settleBatchViaAgent()` → agent `POST /ap2/sessions/{id}/settle` → closed mandate + HIP-745 transfer + receipt |
+| 4b | Per batch: HCS audit | Optional `BATCH_EXECUTE` when `CPU_HCS_BATCH_AUDIT` enabled ([`src/hcs.ts`](src/hcs.ts)) |
 | 4c | Per batch: hydrate from events | Off-chain `TensorStore` rebuilt |
 | 5 | Compute `weightsHash` | Final weight tensor hash |
 | 6 | `commitCpuModel()` | Provenance committed to `ModelRegistry` |
@@ -863,6 +1012,8 @@ sequenceDiagram
   participant Executor as CpuBatchExecutor
   participant Cores as Compute Cores
   participant HCS as HCS Topic
+  participant Agent as FastAPI Agent
+  participant Hedera as HIP-745 Transfer
   participant ModelReg as ModelRegistry
 
   Worker->>Runner: runCpuTraining(samples, deployment)
@@ -875,8 +1026,9 @@ sequenceDiagram
     Dispatcher->>Executor: executeBatch / executeBatchPacked
     Executor->>Cores: run opcodes in TX memory
     Cores-->>Executor: TensorCommitted events
-    Dispatcher->>HCS: BATCH_EXECUTE audit
-    Dispatcher->>Dispatcher: MPP reimburse + ACP progress
+    Dispatcher->>HCS: BATCH_EXECUTE audit optional
+    Dispatcher->>Agent: settleBatchViaAgent gas receipt
+    Agent->>Hedera: allowance transfer from user budget
     Dispatcher->>Dispatcher: hydrate TensorStore from receipt
   end
   Runner->>ModelReg: commitCpuModel(weightsHash, …)
@@ -905,14 +1057,14 @@ This routing is what makes cpuarc **practical on Hedera**—without it, the 128K
 
 ## 8. Conclusion
 
-POCU unifies a conversational AI agent, wallet-native commerce protocols, and ledger-executed machine learning into a single verifiable stack on Hedera. It is not a prototype of an idea—it is a working system where matrix multiplications run in Solidity, audit trails live on HCS, gas is reimbursed through signed mandates, and trained models arrive as HTS NFTs in the user's wallet.
+POCU unifies a conversational AI agent, Google AP2 wallet-native payments, and ledger-executed machine learning into a single verifiable stack on Hedera. It is not a prototype of an idea—it is a working system where Tensor Operations run on-chain, audit trails live on HCS, training takes place through signed mandates, and a literal trained model manifest arrives along with an HTS NFT in the user's wallet.
 
 For the AI agent era, POCU proves that autonomous agents can discover data, spend within user-defined budgets, execute complex on-chain work, and deliver tangible tokenized artifacts—all with cryptographic proof of every step. For Hedera, POCU demonstrates that the ledger is not merely a settlement layer—it is a **compute surface** waiting for the right interface.
 
-For users who have never written a line of PyTorch, POCU makes ML training as simple as describing a goal in chat. For developers and judges who demand proof, every weight hash, every batch, and every payment is on-chain and auditable.
+For users who have never written a line of PyTorch, POCU makes ML training as simple as describing a goal in chat. For developers and organisations who demand proof, every weight hash, every batch, and every payment is on-chain and auditable.
 
 **The ledger is no longer just a ledger—it is a compute surface, and POCU is the agent that makes it usable.**
 
 ---
 
-*Built for the Hedera AI Hackathon. POCU v2.0.0 — On-Chain CPU (cpuarc).*
+*Built for the Hedera AI Hackathon. POCU v1.0.0*
