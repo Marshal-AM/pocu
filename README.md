@@ -595,6 +595,7 @@ POCU is built **Hedera-native**—not a generic EVM fork with Hedera bolted on. 
 Eight EVM contracts form the cpuarc training stack (detailed in [§7](#7-on-chain-cpu-cpuarc)).
 
 ### 6.2 HCS — Consensus & Audit Trail
+<img width="1871" height="906" alt="image" src="https://github.com/user-attachments/assets/fec3a6c1-c7af-4546-8c10-ba894d538163" />
 
 **What:** Hedera Consensus Service topics carrying structured audit messages for every training run.
 
@@ -616,6 +617,7 @@ Eight EVM contracts form the cpuarc training stack (detailed in [§7](#7-on-chai
 Each training run creates a **fresh HCS topic** via `createHcsTopic()`. The shared topic `0.0.9191580` ([`deployments/hcs.json`](deployments/hcs.json)) is a legacy deployment artifact; per-run topics are primary.
 
 ### 6.3 HTS — Model NFT Deliverables
+<img width="1829" height="851" alt="image" src="https://github.com/user-attachments/assets/259a5472-17eb-4f9c-96ca-472347bd3118" />
 
 **What:** Non-fungible token representing a trained model, minted and transferred to the user's wallet.
 
